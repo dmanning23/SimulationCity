@@ -1,0 +1,59 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+
+# uv
+# uv.lock is intentionally committed (like package-lock.json)
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Node / frontend
+node_modules/
+dist/
+.next/
+.nuxt/
+.cache/
+*.local
+
+# Build output
+*.tsbuildinfo
+
+# Testing
+.pytest_cache/
+htmlcov/
+.coverage
+*.cover
+coverage.xml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Heroku
+.heroku/
+
+# Superpowers brainstorming sessions
+.superpowers/
