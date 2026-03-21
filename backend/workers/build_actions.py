@@ -40,6 +40,10 @@ def _reset_mongo_on_fork(**kwargs):
 # --- Handlers ---
 
 def _handle_place_building(city_id: str, user_id: str, payload: dict) -> None:
+    required = {"building_type", "position", "chunk_x", "chunk_y"}
+    missing = required - payload.keys()
+    if missing:
+        raise ValueError(f"place_building payload missing required fields: {missing}")
     building = {
         "id": str(uuid.uuid4()),
         "type": payload["building_type"],
@@ -98,8 +102,8 @@ def process_build_action(
         return
     try:
         REGISTRY[action_type](city_id, user_id, payload)
-    except NotImplementedError:
-        raise  # stub not yet implemented — do not retry
+    except (NotImplementedError, ValueError):
+        raise  # structural errors — do not retry
     except Exception as exc:
         logger.exception("Build action %r failed: %s", action_type, exc)
         raise self.retry(exc=exc, countdown=2 ** self.request.retries)

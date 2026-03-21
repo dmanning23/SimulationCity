@@ -8,6 +8,8 @@ from app.constants import VALID_ACTION_TYPES
 from app.models.chunk import Chunk
 from app.models.city import City
 from app.services.auth import decode_token
+# The Celery() constructor reads broker config but does not establish a socket connection
+# until send_task() is called, so startup-order risk is limited to misconfiguration.
 from workers.celery_app import celery_app as _celery_app
 
 logger = logging.getLogger(__name__)
