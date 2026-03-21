@@ -191,15 +191,20 @@ async def build_action(sid: str, data: dict):
         await sio.emit("error", {"message": f"Unknown action_type: {action_type!r}"}, to=sid)
         return
 
-    _celery_app.send_task(
-        "workers.build_actions.process_build_action",
-        kwargs={
-            "city_id": session["city_id"],
-            "user_id": session["user_id"],
-            "action_type": action_type,
-            "payload": data.get("payload", {}),
-        },
-        queue="high_priority",
-    )
+    try:
+        _celery_app.send_task(
+            "workers.build_actions.process_build_action",
+            kwargs={
+                "city_id": session["city_id"],
+                "user_id": session["user_id"],
+                "action_type": action_type,
+                "payload": data.get("payload", {}),
+            },
+            queue="high_priority",
+        )
+    except Exception as exc:
+        logger.exception("Failed to enqueue build_action %r: %s", action_type, exc)
+        await sio.emit("error", {"message": "Failed to enqueue action — please try again"}, to=sid)
+        return
     await sio.emit("action_queued", {"action_type": action_type, "status": "queued"}, to=sid)
     logger.info("Queued %r for city %s by user %s", action_type, session["city_id"], session["user_id"])

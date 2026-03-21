@@ -909,130 +909,105 @@ TDD: write the socket integration test, then add the handler to `socket_handlers
 
 - [ ] **Step 1: Write failing Socket.IO integration test**
 
+> **NOTE:** `socketio.AsyncTestClient` was removed in python-socketio 5.x. Test by invoking the
+> registered handler directly from `sio.handlers['/']` and patching `sio.get_session` / `sio.emit`.
+
 Create `backend/tests/test_socket_build_action.py`:
 
 ```python
-"""Integration tests for the build_action Socket.IO event handler."""
+"""Integration tests for the build_action Socket.IO event handler.
 
+python-socketio 5.x removed AsyncTestClient.  We test by:
+  1. Retrieving the registered handler function from sio.handlers['/'].
+  2. Mocking sio.get_session to return preset session data.
+  3. Mocking sio.emit to capture emitted events.
+  4. Calling the handler directly — no network I/O needed.
+"""
 import pytest
-import socketio
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 
 from app.socket_handlers import sio
-from app.services.auth import create_access_token, hash_password
+
+_FAKE_SID = "test-sid-build-action"
+_FAKE_USER_ID = "000000000000000000000001"
+_FAKE_CITY_ID = "000000000000000000000002"
+
+
+def _get_handler(event: str):
+    handler = sio.handlers.get("/", {}).get(event)
+    if handler is None:
+        raise RuntimeError(f"Event '{event}' is not registered on sio")
+    return handler
+
+
+async def _capture_emit(emitted_events):
+    async def _inner(event, data, to=None, **kwargs):
+        emitted_events.append({"name": event, "data": data})
+    return _inner
 
 
 @pytest.fixture
-async def city_and_token(db):
-    """Create a player + city and return (token, city_id_str)."""
-    from app.models.player import Player
-    from app.models.city import City
-
-    player = Player(
-        username="builder",
-        email="builder@test.com",
-        hashed_password=hash_password("pw"),
-    )
-    await player.insert()
-
-    city = City(name="BuildCity", owner_id=player.id)
-    await city.insert()
-
-    token = create_access_token(str(player.id))
-    return token, str(city.id)
+def with_city_session():
+    session = {"user_id": _FAKE_USER_ID, "city_id": _FAKE_CITY_ID}
+    with patch.object(sio, "get_session", new=AsyncMock(return_value=session)):
+        yield session
 
 
 @pytest.fixture
-async def joined_client(city_and_token):
-    """Connected + authenticated + city-joined Socket.IO test client."""
-    import asyncio
-    token, city_id = city_and_token
-    client = socketio.AsyncTestClient(sio)
-    await client.connect(auth={"token": token})
-    await client.emit("join_city", {"city_id": city_id})
-    # Yield to the event loop so the server-side join_city coroutine (which does
-    # async DB lookups) runs to completion and saves city_id to the session before
-    # the test body emits build_action.
-    await asyncio.sleep(0)
-    client.get_received()  # drain initial_state
-    yield client, city_id
-    await client.disconnect()
+def without_city_session():
+    session = {"user_id": _FAKE_USER_ID}
+    with patch.object(sio, "get_session", new=AsyncMock(return_value=session)):
+        yield session
 
 
-async def test_build_action_queues_task_and_acks(joined_client):
-    """Valid build_action enqueues task and emits action_queued."""
-    client, city_id = joined_client
-
+async def test_build_action_queues_task_and_acks(with_city_session):
+    handler = _get_handler("build_action")
+    emitted_events = []
     mock_send = MagicMock()
-    with patch("app.socket_handlers._celery_app") as mock_app:
+    with patch("app.socket_handlers._celery_app") as mock_app, \
+         patch.object(sio, "emit", side_effect=await _capture_emit(emitted_events)):
         mock_app.send_task = mock_send
-        await client.emit(
-            "build_action",
-            {
-                "action_type": "place_building",
-                "payload": {
-                    "chunk_x": 0,
-                    "chunk_y": 0,
-                    "building_type": "residential",
-                    "position": {"x": 1, "y": 2},
-                },
-            },
-        )
+        await handler(_FAKE_SID, {"action_type": "place_building", "payload": {"chunk_x": 0, "chunk_y": 0, "building_type": "residential", "position": {"x": 1, "y": 2}}})
 
-    received = client.get_received()
-    ack = next((r for r in received if r["name"] == "action_queued"), None)
+    ack = next((e for e in emitted_events if e["name"] == "action_queued"), None)
     assert ack is not None
-    assert ack["args"][0]["action_type"] == "place_building"
-    assert ack["args"][0]["status"] == "queued"
-
+    assert ack["data"]["action_type"] == "place_building"
+    assert ack["data"]["status"] == "queued"
     mock_send.assert_called_once()
-    call_kwargs = mock_send.call_args
-    assert call_kwargs.args[0] == "workers.build_actions.process_build_action"
-    assert call_kwargs.kwargs["queue"] == "high_priority"
-    task_kwargs = call_kwargs.kwargs["kwargs"]
-    assert task_kwargs["city_id"] == city_id
-    assert task_kwargs["action_type"] == "place_building"
+    assert mock_send.call_args.args[0] == "workers.build_actions.process_build_action"
+    assert mock_send.call_args.kwargs["queue"] == "high_priority"
+    assert mock_send.call_args.kwargs["kwargs"]["city_id"] == _FAKE_CITY_ID
 
 
-async def test_build_action_unknown_type_emits_error(joined_client):
-    """Unknown action_type returns error event, no task enqueued."""
-    client, _ = joined_client
-
+async def test_build_action_unknown_type_emits_error(with_city_session):
+    handler = _get_handler("build_action")
+    emitted_events = []
     mock_send = MagicMock()
-    with patch("app.socket_handlers._celery_app") as mock_app:
+    with patch("app.socket_handlers._celery_app") as mock_app, \
+         patch.object(sio, "emit", side_effect=await _capture_emit(emitted_events)):
         mock_app.send_task = mock_send
-        await client.emit("build_action", {"action_type": "destroy_world", "payload": {}})
+        await handler(_FAKE_SID, {"action_type": "destroy_world", "payload": {}})
 
-    received = client.get_received()
-    error = next((r for r in received if r["name"] == "error"), None)
+    error = next((e for e in emitted_events if e["name"] == "error"), None)
     assert error is not None
-    assert "Unknown" in error["args"][0]["message"]
+    assert "Unknown" in error["data"]["message"]
     mock_send.assert_not_called()
 
 
-async def test_build_action_missing_action_type_emits_error(joined_client):
-    """Missing action_type emits error."""
-    client, _ = joined_client
-    await client.emit("build_action", {"payload": {}})
-    received = client.get_received()
-    assert any(r["name"] == "error" for r in received)
+async def test_build_action_missing_action_type_emits_error(with_city_session):
+    handler = _get_handler("build_action")
+    emitted_events = []
+    with patch.object(sio, "emit", side_effect=await _capture_emit(emitted_events)):
+        await handler(_FAKE_SID, {"payload": {}})
+    assert any(e["name"] == "error" for e in emitted_events)
 
 
-async def test_build_action_without_joining_city_emits_error(city_and_token):
-    """Client connected but not joined to a city gets an error on build_action."""
-    import asyncio
-    token, _ = city_and_token
-    client = socketio.AsyncTestClient(sio)
-    await client.connect(auth={"token": token})
-    # Deliberately skip join_city — session has user_id but no city_id
-    await asyncio.sleep(0)
-
-    await client.emit("build_action", {"action_type": "place_building", "payload": {}})
-    await asyncio.sleep(0)
-
-    received = client.get_received()
-    assert any(r["name"] == "error" for r in received)
-    await client.disconnect()
+async def test_build_action_without_joining_city_emits_error(without_city_session):
+    handler = _get_handler("build_action")
+    emitted_events = []
+    with patch.object(sio, "emit", side_effect=await _capture_emit(emitted_events)):
+        await handler(_FAKE_SID, {"action_type": "place_building", "payload": {}})
+    assert any(e["name"] == "error" for e in emitted_events)
 ```
 
 - [ ] **Step 2: Run — verify FAIL**
