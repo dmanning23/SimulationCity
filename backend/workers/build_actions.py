@@ -1,10 +1,13 @@
 import logging
+import uuid
 from datetime import datetime, timezone
 from typing import Callable
 
+from bson import ObjectId
 from celery.signals import worker_process_init
 
 from app.config import settings
+from app.constants import VALID_ACTION_TYPES
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -13,6 +16,10 @@ logger = logging.getLogger(__name__)
 _mongo_client = None
 
 
+# Thread safety note: this lazy initializer is NOT thread-safe. It is safe
+# only for Celery's default prefork concurrency model (one thread per worker
+# process). Do not switch to --pool=gevent or --pool=threads without adding
+# a threading.Lock guard here.
 def _get_db():
     global _mongo_client
     if _mongo_client is None:
@@ -33,9 +40,6 @@ def _reset_mongo_on_fork(**kwargs):
 # --- Handlers ---
 
 def _handle_place_building(city_id: str, user_id: str, payload: dict) -> None:
-    import uuid
-    from bson import ObjectId
-
     building = {
         "id": str(uuid.uuid4()),
         "type": payload["building_type"],
@@ -78,6 +82,10 @@ REGISTRY: dict[str, Callable] = {
     "demolish": _handle_demolish,
 }
 
+assert REGISTRY.keys() == VALID_ACTION_TYPES, (
+    f"REGISTRY keys {set(REGISTRY.keys())} do not match VALID_ACTION_TYPES {VALID_ACTION_TYPES}"
+)
+
 
 # --- Task ---
 
@@ -85,7 +93,7 @@ REGISTRY: dict[str, Callable] = {
 def process_build_action(
     self, city_id: str, user_id: str, action_type: str, payload: dict
 ) -> None:
-    if action_type not in REGISTRY:
+    if action_type not in VALID_ACTION_TYPES:
         logger.warning("Unknown action_type %r — skipping (no retry)", action_type)
         return
     try:
