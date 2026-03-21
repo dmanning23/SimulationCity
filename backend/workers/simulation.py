@@ -67,16 +67,6 @@ def compute_happiness(avg_pollution: float, commercial_count: int) -> int:
 # ---------------------------------------------------------------------------
 
 @celery_app.task(queue="simulation")
-def tick_all_cities() -> None:
-    """Beat entry point: fan out one simulate_city_tick per city."""
-    db = _get_db()
-    city_ids = [str(doc["_id"]) for doc in db.cities.find({}, {"_id": 1})]
-    for city_id in city_ids:
-        simulate_city_tick.delay(city_id)
-    logger.info("Dispatched ticks for %d cities", len(city_ids))
-
-
-@celery_app.task(queue="simulation")
 def simulate_city_tick(city_id: str) -> None:
     """Apply one simulation tick to all chunks in a city and update global stats."""
     db = _get_db()
@@ -89,6 +79,7 @@ def simulate_city_tick(city_id: str) -> None:
     total_pop_delta = 0
     all_pollution: list[float] = []
     commercial_count = 0
+    writes_applied = 0
 
     for chunk in chunks:
         old_version = chunk["version"]
@@ -103,7 +94,7 @@ def simulate_city_tick(city_id: str) -> None:
         )
 
         # Conditional write: skip silently if version changed (another process beat us)
-        db.chunks.update_one(
+        result = db.chunks.update_one(
             {"_id": chunk["_id"], "version": old_version},
             {
                 "$set": {
@@ -113,6 +104,15 @@ def simulate_city_tick(city_id: str) -> None:
                 "$inc": {"version": 1},
             },
         )
+        if result.modified_count:
+            writes_applied += 1
+
+    if writes_applied == 0:
+        logger.warning(
+            "simulate_city_tick city=%s: all %d chunk write(s) skipped (version conflicts)",
+            city_id, len(chunks),
+        )
+        return
 
     city = db.cities.find_one({"_id": ObjectId(city_id)})
     if not city:
@@ -140,3 +140,13 @@ def simulate_city_tick(city_id: str) -> None:
         "Ticked city %s: pop=%d treasury=%.1f happiness=%d",
         city_id, new_pop, new_treasury, happiness,
     )
+
+
+@celery_app.task(queue="simulation")
+def tick_all_cities() -> None:
+    """Beat entry point: fan out one simulate_city_tick per city."""
+    db = _get_db()
+    city_ids = [str(doc["_id"]) for doc in db.cities.find({}, {"_id": 1})]
+    for city_id in city_ids:
+        simulate_city_tick.delay(city_id)
+    logger.info("Dispatched ticks for %d cities", len(city_ids))
