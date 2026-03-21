@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 from typing import Callable
 
 from celery.signals import worker_process_init
@@ -32,7 +33,30 @@ def _reset_mongo_on_fork(**kwargs):
 # --- Handlers ---
 
 def _handle_place_building(city_id: str, user_id: str, payload: dict) -> None:
-    raise NotImplementedError
+    import uuid
+    from bson import ObjectId
+
+    building = {
+        "id": str(uuid.uuid4()),
+        "type": payload["building_type"],
+        "subtype": payload.get("subtype", ""),
+        "position": payload["position"],
+        "size": payload.get("size", {"width": 1, "height": 1}),
+        "level": 1,
+        "health": 100,
+        "asset_id": None,
+    }
+    _get_db().chunks.update_one(
+        {
+            "city_id": ObjectId(city_id),
+            "coordinates.x": payload["chunk_x"],
+            "coordinates.y": payload["chunk_y"],
+        },
+        {
+            "$push": {"base.buildings": building},
+            "$set": {"last_updated": datetime.now(timezone.utc)},
+        },
+    )
 
 
 def _handle_place_road(city_id: str, user_id: str, payload: dict) -> None:

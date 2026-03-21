@@ -64,7 +64,7 @@ def pymongo_db():
     connect to simulationcity_test and both drop all collections on teardown.
     Worker tests (sync) use this fixture; socket/FastAPI tests (async) use `db`.
     """
-    client = _pymongo.MongoClient(_MONGO_URL)
+    client = _pymongo.MongoClient(_MONGO_URL, tz_aware=True)
     db = client[_TEST_DB]
     yield db
     for name in db.list_collection_names():
