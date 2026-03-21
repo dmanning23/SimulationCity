@@ -4,9 +4,11 @@ import socketio
 from beanie import PydanticObjectId
 from jose import JWTError
 
+from app.constants import VALID_ACTION_TYPES
 from app.models.chunk import Chunk
 from app.models.city import City
 from app.services.auth import decode_token
+from workers.celery_app import celery_app as _celery_app
 
 logger = logging.getLogger(__name__)
 
@@ -171,3 +173,33 @@ async def update_viewport(sid: str, data: dict):
     if not session or not session.get("city_id"):
         return
     await sio.save_session(sid, {**session, "viewport": data.get("viewport", {})})
+
+
+@sio.event
+async def build_action(sid: str, data: dict):
+    session = await sio.get_session(sid)
+    if not session or not session.get("user_id") or not session.get("city_id"):
+        await sio.emit("error", {"message": "Must be joined to a city to perform actions"}, to=sid)
+        return
+
+    action_type = data.get("action_type")
+    if not action_type:
+        await sio.emit("error", {"message": "action_type is required"}, to=sid)
+        return
+
+    if action_type not in VALID_ACTION_TYPES:
+        await sio.emit("error", {"message": f"Unknown action_type: {action_type!r}"}, to=sid)
+        return
+
+    _celery_app.send_task(
+        "workers.build_actions.process_build_action",
+        kwargs={
+            "city_id": session["city_id"],
+            "user_id": session["user_id"],
+            "action_type": action_type,
+            "payload": data.get("payload", {}),
+        },
+        queue="high_priority",
+    )
+    await sio.emit("action_queued", {"action_type": action_type, "status": "queued"}, to=sid)
+    logger.info("Queued %r for city %s by user %s", action_type, session["city_id"], session["user_id"])
