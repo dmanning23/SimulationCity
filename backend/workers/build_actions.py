@@ -1,9 +1,9 @@
 import logging
-from datetime import datetime, timezone
 from typing import Callable
 
+from celery.signals import worker_process_init
+
 from app.config import settings
-from app.constants import VALID_ACTION_TYPES
 from workers.celery_app import celery_app
 
 logger = logging.getLogger(__name__)
@@ -18,6 +18,15 @@ def _get_db():
         from pymongo import MongoClient
         _mongo_client = MongoClient(settings.mongodb_url)
     return _mongo_client[settings.mongodb_db_name]
+
+
+@worker_process_init.connect
+def _reset_mongo_on_fork(**kwargs):
+    """Close and reset MongoClient after prefork so child workers get fresh connections."""
+    global _mongo_client
+    if _mongo_client is not None:
+        _mongo_client.close()
+        _mongo_client = None
 
 
 # --- Handlers ---
@@ -57,6 +66,8 @@ def process_build_action(
         return
     try:
         REGISTRY[action_type](city_id, user_id, payload)
+    except NotImplementedError:
+        raise  # stub not yet implemented — do not retry
     except Exception as exc:
         logger.exception("Build action %r failed: %s", action_type, exc)
         raise self.retry(exc=exc, countdown=2 ** self.request.retries)

@@ -23,17 +23,19 @@ def test_registry_dispatches_to_correct_handler():
     )
 
 
-def test_unknown_action_type_returns_silently():
+def test_unknown_action_type_returns_silently(caplog):
     """Unknown action_type logs a warning and returns — does not raise."""
+    import logging
     from workers.build_actions import process_build_action
 
-    # Should not raise
-    result = process_build_action.apply(
-        kwargs={
-            "city_id": "000000000000000000000001",
-            "user_id": "000000000000000000000002",
-            "action_type": "launch_missiles",
-            "payload": {},
-        }
-    )
+    with caplog.at_level(logging.WARNING):
+        result = process_build_action.apply(
+            kwargs={
+                "city_id": "000000000000000000000001",
+                "user_id": "000000000000000000000002",
+                "action_type": "launch_missiles",
+                "payload": {},
+            }
+        )
     assert result.successful()
+    assert any("launch_missiles" in r.message for r in caplog.records)
