@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from bson import ObjectId
 
 from app.config import settings
-from workers.celery_app import celery_app
+# celery_app imported in Task 5 when @celery_app.task decorators are added
 
 logger = logging.getLogger(__name__)
 
