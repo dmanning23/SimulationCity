@@ -9,6 +9,7 @@ Run tests from the backend directory:
 """
 
 import os
+import pymongo as _pymongo
 
 # Override settings before any app imports so pydantic-settings picks them up.
 os.environ.setdefault("MONGODB_URL", "mongodb://localhost:27017")
@@ -53,3 +54,19 @@ async def http_client(db):
         transport=ASGITransport(app=socket_app), base_url="http://test"
     ) as ac:
         yield ac
+
+
+@pytest.fixture()
+def pymongo_db():
+    """Synchronous pymongo DB for worker integration tests. Cleaned up after each test.
+
+    WARNING: Do not combine with the async `db` fixture in the same test — both
+    connect to simulationcity_test and both drop all collections on teardown.
+    Worker tests (sync) use this fixture; socket/FastAPI tests (async) use `db`.
+    """
+    client = _pymongo.MongoClient(_MONGO_URL)
+    db = client[_TEST_DB]
+    yield db
+    for name in db.list_collection_names():
+        db.drop_collection(name)
+    client.close()
