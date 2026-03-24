@@ -1,8 +1,11 @@
 """
 Test configuration.
 
-Requires docker-compose to be running (MongoDB + Redis):
-    docker-compose up -d
+Tests use a LOCAL MongoDB (localhost:27017) regardless of what MONGODB_URL is set to
+in .env. This keeps test writes off MongoDB Atlas.
+
+Start test infrastructure before running tests:
+    docker-compose up -d          # starts Redis + mongodb-test container
 
 Run tests from the backend directory:
     uv run pytest
@@ -11,8 +14,9 @@ Run tests from the backend directory:
 import os
 import pymongo as _pymongo
 
-# Override settings before any app imports so pydantic-settings picks them up.
-os.environ.setdefault("MONGODB_URL", "mongodb://localhost:27017")
+# Always use local MongoDB for tests — never hit Atlas with test data.
+# MONGODB_URL from .env (Atlas) is intentionally overridden here.
+os.environ["MONGODB_URL"] = "mongodb://localhost:27017"
 os.environ.setdefault("MONGODB_DB_NAME", "simulationcity_test")
 os.environ.setdefault("SECRET_KEY", "test-secret-key-not-for-production")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6379/1")

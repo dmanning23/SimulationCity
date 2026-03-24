@@ -1,25 +1,10 @@
 version: "3.9"
 
-# NOTE: MongoDB change streams (Phase 3) require a replica set.
-# This standalone config is sufficient for Phase 1 & 2.
-# See docs/development-roadmap.md Phase 3 for replica set setup.
+# MongoDB is hosted on Atlas (replica set included — required for Phase 3 change streams).
+# Set MONGODB_URL in backend/.env to your Atlas connection string.
+# This file only manages local infrastructure that isn't hosted externally.
 
 services:
-  mongodb:
-    image: mongo:7
-    container_name: simulationcity-mongo
-    ports:
-      - "27017:27017"
-    volumes:
-      - mongo_data:/data/db
-    environment:
-      MONGO_INITDB_DATABASE: simulationcity
-    healthcheck:
-      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
   redis:
     image: redis:7-alpine
     container_name: simulationcity-redis
@@ -34,6 +19,20 @@ services:
       timeout: 3s
       retries: 5
 
+  # Local MongoDB for tests only — keeps test writes off Atlas.
+  # Tests hardcode localhost:27017 via conftest.py os.environ.setdefault.
+  mongodb-test:
+    image: mongo:7
+    container_name: simulationcity-mongo-test
+    ports:
+      - "27017:27017"
+    tmpfs:
+      - /data/db  # in-memory — no persistence needed for tests
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
 volumes:
-  mongo_data:
   redis_data:
