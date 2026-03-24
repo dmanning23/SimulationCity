@@ -31,7 +31,7 @@ class CitySettings(BaseModel):
 class GlobalStats(BaseModel):
     population: int = 0
     happiness: int = 50
-    treasury: int = 10000
+    treasury: float = 10000.0
 
 
 class City(Document):

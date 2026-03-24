@@ -138,3 +138,26 @@ def test_route_city_only_last_updated_skipped():
     from app.change_stream import _route_city_event
     event = _city_event({"last_updated": "..."}, _city_doc())
     assert _route_city_event(event) is None
+
+
+def test_route_chunk_event_returns_none_for_global_stats_key():
+    """_route_chunk_event must not match global_stats.* keys — those belong to cities."""
+    from app.change_stream import _route_chunk_event
+    event = _chunk_event({"global_stats.population": 5}, _chunk_doc())
+    assert _route_chunk_event(event) is None
+
+
+def test_route_chunk_event_none_full_document_does_not_crash():
+    """fullDocument can be None if updateLookup not configured — must not raise."""
+    from app.change_stream import _route_chunk_event
+    event = {
+        "operationType": "update",
+        "_id": {"_data": "resume_token"},
+        "updateDescription": {"updatedFields": {"layers.pollution.coverage": 0.1}},
+        "fullDocument": None,
+    }
+    result = _route_chunk_event(event)
+    # Should return a payload (not None) but with empty/None coordinate fields
+    assert result is not None
+    name, payload = result
+    assert name == "layers_update"
