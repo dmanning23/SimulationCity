@@ -70,3 +70,99 @@ def _route_city_event(event: dict) -> tuple[str, dict] | None:
         "treasury": stats.get("treasury", 0.0),
         "happiness": stats.get("happiness", 0),
     }
+
+
+# ---------------------------------------------------------------------------
+# Stream watcher coroutines
+# ---------------------------------------------------------------------------
+
+_WATCH_BACKOFF_SECONDS = 5
+
+
+async def _watch_chunks(sio: socketio.AsyncServer, db) -> None:
+    """Forever: open the chunks change stream, route events, emit to Socket.IO.
+    Retries with backoff on any non-cancel exception. Exits only on CancelledError.
+    """
+    resume_token = None
+    while True:
+        try:
+            kwargs: dict = {"full_document": "updateLookup"}
+            if resume_token:
+                kwargs["resume_after"] = resume_token
+            async with db["chunks"].watch(
+                [{"$match": {"operationType": "update"}}], **kwargs
+            ) as stream:
+                async for event in stream:
+                    resume_token = event["_id"]
+                    result = _route_chunk_event(event)
+                    if result:
+                        event_name, payload = result
+                        await sio.emit(event_name, payload, room=f"city:{payload['city_id']}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("chunks change stream error — retrying in %ds: %s", _WATCH_BACKOFF_SECONDS, exc)
+            resume_token = None
+            await asyncio.sleep(_WATCH_BACKOFF_SECONDS)
+
+
+async def _watch_cities(sio: socketio.AsyncServer, db) -> None:
+    """Forever: open the cities change stream, route events, emit to Socket.IO.
+    Retries with backoff on any non-cancel exception. Exits only on CancelledError.
+    """
+    resume_token = None
+    while True:
+        try:
+            kwargs: dict = {"full_document": "updateLookup"}
+            if resume_token:
+                kwargs["resume_after"] = resume_token
+            async with db["cities"].watch(
+                [{"$match": {"operationType": "update"}}], **kwargs
+            ) as stream:
+                async for event in stream:
+                    resume_token = event["_id"]
+                    result = _route_city_event(event)
+                    if result:
+                        event_name, payload = result
+                        await sio.emit(event_name, payload, room=f"city:{payload['city_id']}")
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.exception("cities change stream error — retrying in %ds: %s", _WATCH_BACKOFF_SECONDS, exc)
+            resume_token = None
+            await asyncio.sleep(_WATCH_BACKOFF_SECONDS)
+
+
+# ---------------------------------------------------------------------------
+# Public entry point
+# ---------------------------------------------------------------------------
+
+async def watch_changes(sio: socketio.AsyncServer, mongo_url: str, db_name: str) -> None:
+    """Start chunk and city change stream watchers. Run until cancelled.
+
+    Opens its own Motor client (independent of the Beanie connection used by FastAPI).
+    Call from the FastAPI lifespan:
+
+        task = asyncio.create_task(
+            watch_changes(sio, settings.mongodb_url, settings.mongodb_db_name)
+        )
+        yield
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    """
+    from motor.motor_asyncio import AsyncIOMotorClient
+
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[db_name]
+    chunk_task = asyncio.create_task(_watch_chunks(sio, db))
+    city_task = asyncio.create_task(_watch_cities(sio, db))
+    try:
+        await asyncio.gather(chunk_task, city_task)
+    finally:
+        chunk_task.cancel()
+        city_task.cancel()
+        await asyncio.gather(chunk_task, city_task, return_exceptions=True)
+        client.close()

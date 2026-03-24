@@ -1,4 +1,7 @@
 """Unit tests for change stream routing helpers."""
+import asyncio
+from unittest.mock import AsyncMock, MagicMock, patch
+
 import pytest
 from bson import ObjectId
 
@@ -161,3 +164,174 @@ def test_route_chunk_event_none_full_document_does_not_crash():
     assert result is not None
     name, payload = result
     assert name == "layers_update"
+
+
+# ---------------------------------------------------------------------------
+# Watcher coroutine tests
+# ---------------------------------------------------------------------------
+
+class _MockStream:
+    """Async context manager + iterator. Yields events then raises CancelledError."""
+    def __init__(self, *events):
+        self._events = list(events)
+        self._pos = 0
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        pass
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        if self._pos < len(self._events):
+            event = self._events[self._pos]
+            self._pos += 1
+            return event
+        raise asyncio.CancelledError()
+
+
+def _chunk_change_event(city_id=_CITY_OID, x=0, y=0):
+    """A synthetic chunk change event with a layers update."""
+    return {
+        "_id": {"_data": "resume_token_1"},
+        "operationType": "update",
+        "updateDescription": {"updatedFields": {"layers.pollution.coverage": 0.25}},
+        "fullDocument": {
+            "city_id": city_id,
+            "coordinates": {"x": x, "y": y},
+            "layers": {"electricity": {}, "pollution": {"coverage": 0.25}, "water": {}},
+            "base": {"buildings": [], "roads": [], "terrain": []},
+        },
+    }
+
+
+def _city_change_event(city_id=_CITY_OID):
+    """A synthetic city change event with a global_stats update."""
+    return {
+        "_id": {"_data": "resume_token_2"},
+        "operationType": "update",
+        "updateDescription": {
+            "updatedFields": {
+                "global_stats.population": 5,
+                "global_stats.treasury": 500.5,
+                "global_stats.happiness": 80,
+            }
+        },
+        "fullDocument": {
+            "_id": city_id,
+            "global_stats": {"population": 5, "treasury": 500.5, "happiness": 80},
+        },
+    }
+
+
+@pytest.mark.asyncio
+async def test_watch_chunks_emits_layers_update():
+    """_watch_chunks emits layers_update when stream yields a layers change event."""
+    from app.change_stream import _watch_chunks
+
+    event = _chunk_change_event()
+    mock_sio = AsyncMock()
+    mock_collection = MagicMock()
+    mock_collection.watch.return_value = _MockStream(event)
+    mock_db = MagicMock()
+    mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _watch_chunks(mock_sio, mock_db)
+
+    mock_sio.emit.assert_called_once_with(
+        "layers_update",
+        {
+            "city_id": str(_CITY_OID),
+            "chunk_x": 0,
+            "chunk_y": 0,
+            "layers": {"electricity": {}, "pollution": {"coverage": 0.25}, "water": {}},
+        },
+        room=f"city:{_CITY_OID}",
+    )
+
+
+@pytest.mark.asyncio
+async def test_watch_chunks_skips_bookkeeping_event():
+    """_watch_chunks does not emit when only last_updated changes."""
+    from app.change_stream import _watch_chunks
+
+    event = {
+        "_id": {"_data": "resume_token"},
+        "operationType": "update",
+        "updateDescription": {"updatedFields": {"last_updated": "...", "version": 2}},
+        "fullDocument": _chunk_doc(),
+    }
+    mock_sio = AsyncMock()
+    mock_collection = MagicMock()
+    mock_collection.watch.return_value = _MockStream(event)
+    mock_db = MagicMock()
+    mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _watch_chunks(mock_sio, mock_db)
+
+    mock_sio.emit.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_watch_chunks_retries_on_exception():
+    """_watch_chunks logs and reopens the stream after a non-cancel exception."""
+    from app.change_stream import _watch_chunks
+
+    call_count = 0
+
+    def make_stream(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:
+            class FailStream:
+                async def __aenter__(self): return self
+                async def __aexit__(self, *_): pass
+                def __aiter__(self): return self
+                async def __anext__(self): raise ConnectionError("stream died")
+            return FailStream()
+        return _MockStream(_chunk_change_event())
+
+    mock_sio = AsyncMock()
+    mock_collection = MagicMock()
+    mock_collection.watch.side_effect = make_stream
+    mock_db = MagicMock()
+    mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+
+    with patch("app.change_stream.asyncio.sleep", new=AsyncMock()):
+        with pytest.raises(asyncio.CancelledError):
+            await _watch_chunks(mock_sio, mock_db)
+
+    assert call_count == 2
+    mock_sio.emit.assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_watch_cities_emits_stats_update():
+    """_watch_cities emits stats_update when stream yields a global_stats change event."""
+    from app.change_stream import _watch_cities
+
+    event = _city_change_event()
+    mock_sio = AsyncMock()
+    mock_collection = MagicMock()
+    mock_collection.watch.return_value = _MockStream(event)
+    mock_db = MagicMock()
+    mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _watch_cities(mock_sio, mock_db)
+
+    mock_sio.emit.assert_called_once_with(
+        "stats_update",
+        {
+            "city_id": str(_CITY_OID),
+            "population": 5,
+            "treasury": pytest.approx(500.5),
+            "happiness": 80,
+        },
+        room=f"city:{_CITY_OID}",
+    )
