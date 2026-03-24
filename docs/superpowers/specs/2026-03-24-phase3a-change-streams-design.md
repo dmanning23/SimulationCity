@@ -157,6 +157,7 @@ try:
 finally:
     chunk_task.cancel()
     city_task.cancel()
+    await asyncio.gather(chunk_task, city_task, return_exceptions=True)
 ```
 
 Each watcher is a `while True` loop that opens a stream, iterates events, emits to `sio`, and stores the resume token. On any exception inside the loop, it logs the error, sleeps 5s, and retries — the outer task never exits unless cancelled.
