@@ -335,3 +335,29 @@ async def test_watch_cities_emits_stats_update():
         },
         room=f"city:{_CITY_OID}",
     )
+
+
+# ---------------------------------------------------------------------------
+# Lifespan wiring test
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_lifespan_starts_and_stops_watch_changes():
+    """watch_changes is started as a background task during lifespan and cancelled on shutdown."""
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    async def fake_watch_changes(sio, mongo_url, db_name):
+        started.set()
+        try:
+            await asyncio.sleep(9999)
+        except asyncio.CancelledError:
+            stopped.set()
+            raise
+
+    with patch("app.main.watch_changes", side_effect=fake_watch_changes):
+        from app.main import lifespan, app
+        async with lifespan(app):
+            await asyncio.wait_for(started.wait(), timeout=1.0)
+
+    await asyncio.wait_for(stopped.wait(), timeout=1.0)

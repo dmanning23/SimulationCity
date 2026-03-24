@@ -1,9 +1,11 @@
+import asyncio
 from contextlib import asynccontextmanager
 
 import socketio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.change_stream import watch_changes
 from app.config import settings
 from app.database import close_db, init_db
 from app.routers import auth, cities
@@ -13,7 +15,15 @@ from app.socket_handlers import sio
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await init_db()
+    change_stream_task = asyncio.create_task(
+        watch_changes(sio, settings.mongodb_url, settings.mongodb_db_name)
+    )
     yield
+    change_stream_task.cancel()
+    try:
+        await change_stream_task
+    except asyncio.CancelledError:
+        pass
     await close_db()
 
 
