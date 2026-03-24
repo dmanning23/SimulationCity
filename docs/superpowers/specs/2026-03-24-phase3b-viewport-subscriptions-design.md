@@ -174,15 +174,14 @@ Continues to broadcast to the full `city:{city_id}` room. Treasury, population, 
 
 ---
 
-## Disconnect Cleanup
+## Session Cleanup
 
-The existing disconnect handler is extended to call:
+`viewport_store.remove_session(session_id)` is called in two places:
 
-```python
-viewport_store.remove_session(session_id)
-```
+1. **`disconnect` handler** — always runs on socket close; no-op if session never subscribed.
+2. **`leave_city` handler** — a player may leave a city without disconnecting. Calling `remove_session` here ensures chunk subscriber entries are cleared immediately rather than waiting for eventual disconnect.
 
-This runs even if the session never sent `update_viewport` (no-op). It ensures no ghost entries accumulate in `chunk_subscribers` after a session ends.
+Both cases are no-ops if the session is not in the store.
 
 ---
 
@@ -194,6 +193,7 @@ This runs even if the session never sent `update_viewport` (no-op). It ensures n
 | `city_id` in payload does not match session's `city_id` | Emit `error` to session; no state change |
 | Non-integer bbox field | Emit `error` to session; no state change |
 | `max_x < min_x` or `max_y < min_y` | Emit `error` to session; no state change |
+| Bbox larger than 20×20 chunks | Emit `error` to session; no state change |
 | Chunk not found in DB during seed fetch | Skip silently; do not fail the whole seed |
 | `get_subscribers` for unknown chunk key | Return empty set; no emit |
 | Chunk event with missing coordinates in `fullDocument` | Log warning; skip delivery |
