@@ -85,9 +85,35 @@ f"{city_id}:{x}:{y}"
 
 ---
 
+## Changes to Existing Code
+
+### `app/socket_handlers.py`
+
+**`update_viewport` handler** (lines 171–177) — the Phase 3a stub is replaced wholesale. The existing stub saves viewport data into the Socket.IO session dict and does nothing else; Phase 3b removes that behavior entirely and replaces it with the subscription + seed flow described below.
+
+**`join_city` handler** — modified to also register the initial viewport with `viewport_store`. The existing `_load_viewport_chunks` helper and the `viewport` parameter on `join_city` (which use `chunkX / chunkY / radius`) are kept unchanged for the seed that goes into `city_joined`. Additionally, `join_city` converts that initial viewport to a bbox and calls `viewport_store.update_viewport()` so that change stream delivery works from the moment of join, before the client ever sends `update_viewport`:
+
+```python
+# Conversion inside join_city, after successful join:
+cx = viewport.get("chunkX", 0)
+cy = viewport.get("chunkY", 0)
+radius = viewport.get("radius", 2)
+viewport_store.update_viewport(
+    sid, city_id,
+    max(0, cx - radius), max(0, cy - radius),
+    cx + radius, cy + radius,
+)
+```
+
+If no viewport is provided to `join_city`, register a default 4×4 bbox at the origin (matching `_load_viewport_chunks` defaults).
+
+---
+
 ## Socket.IO Events
 
 ### `update_viewport` (client → server)
+
+The new bbox format replaces the old `chunkX / chunkY / radius` format from `join_city`. `update_viewport` is the only event that uses this format going forward; `join_city`'s viewport parameter is left as-is for backward compatibility and converts internally.
 
 ```json
 {
@@ -100,11 +126,14 @@ f"{city_id}:{x}:{y}"
 ```
 
 Handler steps:
-1. Verify the session is authenticated and joined to `city:{city_id}`
-2. Validate that all bbox fields are integers and `max >= min`
-3. Call `viewport_store.update_viewport(...)` → get `(added, removed)`
-4. Fetch MongoDB chunk documents for chunks in `added` (project to `x`, `y`, `base`, `layers`, `version`)
-5. Emit `viewport_seed` to the session
+1. If session has no `city_id` (not yet joined), emit `error` and return
+2. Verify `city_id` in payload matches the session's `city_id`; emit `error` if not
+3. Validate that all bbox fields are integers and `max >= min`
+4. Call `viewport_store.update_viewport(...)` → get `(added, removed)`
+5. Fetch MongoDB chunk documents for chunks in `added` (project to `x`, `y`, `base`, `layers`, `version`)
+6. Emit `viewport_seed` to the session
+
+Note: the server does not send any signal about `removed` chunks. The client is responsible for dropping chunks that are no longer in its subscription once Phase 3b frontend is implemented.
 
 ### `viewport_seed` (server → requesting session only)
 
@@ -126,10 +155,18 @@ Previously emitted to the `city:{city_id}` room. Now delivered only to subscribe
 
 ```python
 # Phase 3b delivery
-chunk_key = f"{city_id}:{chunk_x}:{chunk_y}"
-for sid in viewport_store.get_subscribers(chunk_key):
-    await sio.emit(event_name, payload, to=sid)
+chunk_x = full_document.get("coordinates", {}).get("x")
+chunk_y = full_document.get("coordinates", {}).get("y")
+if chunk_x is None or chunk_y is None:
+    logger.warning("chunk event missing coordinates, skipping delivery")
+    # skip — no valid key to look up
+else:
+    chunk_key = f"{city_id}:{chunk_x}:{chunk_y}"
+    for sid in viewport_store.get_subscribers(chunk_key):
+        await sio.emit(event_name, payload, to=sid)
 ```
+
+Coordinates come from `fullDocument.coordinates.x / .y`, which are always present on Chunk documents when `full_document="updateLookup"` is set. The None guard is a defensive check against malformed documents or future schema changes.
 
 ### Unchanged: `stats_update`
 
@@ -153,11 +190,13 @@ This runs even if the session never sent `update_viewport` (no-op). It ensures n
 
 | Condition | Response |
 |---|---|
+| Session has no `city_id` (not yet joined) | Emit `error` to session; no state change |
+| `city_id` in payload does not match session's `city_id` | Emit `error` to session; no state change |
 | Non-integer bbox field | Emit `error` to session; no state change |
 | `max_x < min_x` or `max_y < min_y` | Emit `error` to session; no state change |
-| `city_id` session is not joined to | Emit `error` to session; no state change |
 | Chunk not found in DB during seed fetch | Skip silently; do not fail the whole seed |
 | `get_subscribers` for unknown chunk key | Return empty set; no emit |
+| Chunk event with missing coordinates in `fullDocument` | Log warning; skip delivery |
 
 ---
 
