@@ -1,14 +1,20 @@
 import { io, Socket } from "socket.io-client";
 
 import { useCityStore } from "./stores/cityStore";
-import type { GlobalStats } from "./stores/cityStore";
 import type { Chunk } from "./stores/viewportStore";
 import { useViewportStore } from "./stores/viewportStore";
 
 let socket: Socket | null = null;
 
-export function initSocket(token: string): Socket {
+export function initSocket(cityId: string): Socket {
   if (socket) socket.disconnect();
+
+  let token = "";
+  try {
+    token = localStorage.getItem("token") ?? "";
+  } catch {
+    // localStorage unavailable (e.g. test environment)
+  }
 
   socket = io(import.meta.env.VITE_SOCKET_URL ?? "", {
     auth: { token },
@@ -21,20 +27,33 @@ export function initSocket(token: string): Socket {
     console.error("[socket] connection error:", err.message)
   );
 
-  socket.on("chunk_update", ({ chunk }: { chunk: Chunk }) => {
-    useViewportStore.getState().updateChunk(chunk);
+  socket.on("initial_state", (data: { city_id: string; city: unknown; settings: unknown }) => {
+    // initial_state is superseded by viewport_seed; log and skip for now
+    console.log("[socket] initial_state received for city", data.city_id);
   });
 
-  socket.on("city_stats_update", ({ stats }: { stats: GlobalStats }) => {
-    useCityStore.getState().setGlobalStats(stats);
+  socket.on("viewport_seed", (data: { chunks: Chunk[] }) => {
+    data.chunks.forEach((chunk) => useViewportStore.getState().updateChunk(chunk));
   });
 
   socket.on(
-    "initial_state",
-    (data: { city: { id: string; name: string; global_stats: GlobalStats }; chunks: Chunk[] }) => {
-      useCityStore.getState().setCityId(data.city.id, data.city.name);
-      useCityStore.getState().setGlobalStats(data.city.global_stats);
-      data.chunks.forEach((chunk) => useViewportStore.getState().updateChunk(chunk));
+    "chunk_update",
+    (data: { city_id: string; chunk_x: number; chunk_y: number; buildings: unknown[]; roads: unknown[] }) => {
+      useViewportStore.getState().patchBase(data.chunk_x, data.chunk_y, data.buildings, data.roads);
+    }
+  );
+
+  socket.on(
+    "layers_update",
+    (data: { city_id: string; chunk_x: number; chunk_y: number; layers: Chunk["layers"] }) => {
+      useViewportStore.getState().patchLayers(data.chunk_x, data.chunk_y, data.layers);
+    }
+  );
+
+  socket.on(
+    "stats_update",
+    (data: { population: number; treasury: number; happiness: number }) => {
+      useCityStore.getState().setGlobalStats(data);
     }
   );
 
@@ -42,7 +61,16 @@ export function initSocket(token: string): Socket {
     console.error("[socket] server error:", message);
   });
 
+  socket.emit("join_city", { city_id: cityId, viewport: { chunkX: 0, chunkY: 0, radius: 2 } });
+
   return socket;
+}
+
+export function emitUpdateViewport(
+  cityId: string,
+  bbox: { min_x: number; min_y: number; max_x: number; max_y: number }
+): void {
+  socket?.emit("update_viewport", { city_id: cityId, bbox });
 }
 
 export const getSocket = (): Socket | null => socket;
