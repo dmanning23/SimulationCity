@@ -37,7 +37,7 @@ Backend
   ▼
 socket.ts
   │  initial_state  → viewportStore.setChunks(chunks) + cityStore.setCityId + cityStore.setGlobalStats
-  │  viewport_seed  → viewportStore.setChunks(chunks)          ← delta: newly visible chunks only
+  │  viewport_seed  → viewportStore.updateChunk() per chunk     ← delta: newly visible chunks only
   │  chunk_update   → viewportStore.patchBase(chunk_x, chunk_y, buildings, roads)
   │  layers_update  → viewportStore.patchLayers(chunk_x, chunk_y, layers)
   │  stats_update   → cityStore.setGlobalStats(population, treasury, happiness)
@@ -100,8 +100,8 @@ export function tileToWorld(tx: number, ty: number): { x: number; y: number } {
 /** Phaser world (x, y) → tile (tx, ty) — rounded to integer */
 export function worldToTile(x: number, y: number): { tx: number; ty: number } {
   return {
-    tx: Math.round(x / TILE_W + y / TILE_H) / 2 * 2 / 2,
-    ty: Math.round(y / TILE_H - x / TILE_W) / 2 * 2 / 2,
+    tx: Math.round((x / (TILE_W / 2) + y / (TILE_H / 2)) / 2),
+    ty: Math.round((y / (TILE_H / 2) - x / (TILE_W / 2)) / 2),
   };
 }
 
@@ -111,13 +111,7 @@ export function cameraBoundsToChunkBbox(
 ): { min_x: number; min_y: number; max_x: number; max_y: number } { ... }
 ```
 
-The precise `worldToTile` implementation should be:
-```typescript
-tx = (x / (TILE_W / 2) + y / (TILE_H / 2)) / 2
-ty = (y / (TILE_H / 2) - x / (TILE_W / 2)) / 2
-```
-
-`cameraBoundsToChunkBbox` converts the four worldView corners to tile coords, takes the min/max, then divides by `CHUNK_SIZE` and floors/ceils to get chunk indices. Adds ±1 chunk padding to avoid edge popping.
+`cameraBoundsToChunkBbox` converts the four worldView corners to tile coords via `worldToTile`, takes the min/max tile indices, then divides by `CHUNK_SIZE` and floors/ceils to get chunk indices. Adds ±1 chunk padding to avoid edge popping.
 
 ---
 
@@ -179,7 +173,7 @@ Tile color is determined by `getTileColor(tileX, tileY, chunk, viewMode)` — a 
 - covered (`layers.water.coverage > 0`): `0x3b82f6`
 - no water: `0x92400e`
 
-All tiles get a 1px darker stroke outline (`graphics.lineStyle(1, color * 0.7, 1)`).
+All tiles get a 1px dark stroke outline using a fixed color: `graphics.lineStyle(1, 0x111111, 1)`.
 
 ---
 
@@ -309,16 +303,31 @@ The `useEffect` cleanup destroys the Phaser game on unmount. In React Strict Mod
 
 ### `frontend/src/socket.ts`
 
-**Fixes (stale event names / payload shapes):**
+**Updated/fixed handlers:**
 
-| Was | Now |
-|-----|-----|
-| `city_stats_update` | `stats_update` |
-| `chunk_update` payload `{ chunk: Chunk }` | `{ city_id, chunk_x, chunk_y, buildings, roads }` |
-| `initial_state` payload shape — already correct | No change needed |
+```typescript
+// RENAME: city_stats_update → stats_update; update to flat payload shape
+socket.on("stats_update", ({ population, treasury, happiness }) => {
+  useCityStore.getState().setGlobalStats({ population, treasury, happiness });
+});
+
+// FIX payload shape: was { chunk: Chunk }, now { city_id, chunk_x, chunk_y, buildings, roads }
+socket.on("chunk_update", ({ chunk_x, chunk_y, buildings, roads }) => {
+  useViewportStore.getState().patchBase(chunk_x, chunk_y, buildings, roads);
+});
+
+// initial_state: already correct event name and city/chunks structure. The payload
+// also includes `settings` (city config) which is intentionally ignored in Phase 4.
+socket.on("initial_state", (data) => {
+  useCityStore.getState().setCityId(data.city.id, data.city.name);
+  useCityStore.getState().setGlobalStats(data.city.global_stats);
+  data.chunks.forEach((chunk) => useViewportStore.getState().updateChunk(chunk));
+});
+```
 
 **New event handlers:**
 ```typescript
+// viewport_seed: upsert each newly-visible chunk (delta, not full replacement)
 socket.on("viewport_seed", ({ chunks }: { chunks: Chunk[] }) => {
   chunks.forEach((chunk) => useViewportStore.getState().updateChunk(chunk));
 });
@@ -327,6 +336,8 @@ socket.on("layers_update", ({ chunk_x, chunk_y, layers }: LayersUpdatePayload) =
   useViewportStore.getState().patchLayers(chunk_x, chunk_y, layers);
 });
 ```
+
+**Note on road updates:** The backend `change_stream.py` currently only triggers `chunk_update` for `base.buildings.*` field changes. Road-only changes (`base.roads.*`) are not routed. A follow-up fix to `change_stream.py` is needed to add `base.roads.*` prefix matching — deferred to the Phase 4 implementation task that touches `change_stream.py`.
 
 **New emit helper:**
 ```typescript
@@ -342,9 +353,6 @@ export function emitUpdateViewport(
 
 **New actions:**
 ```typescript
-// Replace entire chunk set (from initial_state / viewport_seed)
-setChunks: (chunks: Chunk[]) => void;
-
 // Partial update — base layer only (from chunk_update)
 patchBase: (x: number, y: number, buildings: unknown[], roads: unknown[]) => void;
 
@@ -355,7 +363,7 @@ patchLayers: (x: number, y: number, layers: Chunk["layers"]) => void;
 removeChunk: (key: string) => void;
 ```
 
-`updateChunk` (existing) is kept for `initial_state` full chunk upserts.
+`updateChunk` (existing) is used for all full-chunk upserts: `initial_state`, `viewport_seed`. It upserts by key — it does NOT replace the entire map, so chunks outside the new payload remain loaded.
 
 **Chunk type** — add `city_id` field to match server payload:
 ```typescript
@@ -399,7 +407,7 @@ export default function App() {
 | Event | Payload | Handler |
 |-------|---------|---------|
 | `initial_state` | `{ city: { id, name, global_stats, settings }, chunks: Chunk[] }` | cityStore + viewportStore |
-| `viewport_seed` | `{ city_id, chunks: Chunk[] }` | viewportStore.setChunks |
+| `viewport_seed` | `{ city_id, chunks: Chunk[] }` | viewportStore.updateChunk (per chunk) |
 | `chunk_update` | `{ city_id, chunk_x, chunk_y, buildings, roads }` | viewportStore.patchBase |
 | `layers_update` | `{ city_id, chunk_x, chunk_y, layers }` | viewportStore.patchLayers |
 | `stats_update` | `{ city_id, population, treasury, happiness }` | cityStore.setGlobalStats |
@@ -415,8 +423,7 @@ export default function App() {
 - Edge case: negative tile coordinates (camera scrolled left of origin)
 
 ### Unit tests (`frontend/src/stores/viewportStore.test.ts`)
-- `setChunks` replaces the map entirely
-- `updateChunk` upserts by key `"x,y"`
+- `updateChunk` upserts by key `"x,y"`; existing chunks at other keys are unaffected
 - `patchBase` updates only `base.buildings` and `base.roads`, leaves other fields untouched
 - `patchLayers` updates only `layers`, leaves `base` untouched
 - `removeChunk` removes the key; no-op if key absent
