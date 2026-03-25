@@ -118,6 +118,7 @@ async def join_city(sid: str, data: dict):
     # Leave any previously joined city room
     old_city_id = session.get("city_id")
     if old_city_id and old_city_id != city_id:
+        viewport_store.remove_session(sid)  # clear old-city subscriptions before switching
         await sio.leave_room(sid, f"city:{old_city_id}")
 
     await sio.enter_room(sid, f"city:{city_id}")

@@ -35,7 +35,6 @@ def clear_store():
 async def test_join_city_registers_initial_viewport(db):
     """join_city with viewport registers subscription so change stream works immediately."""
     from app.models.city import City
-    from app.models.player import Player
     from beanie import PydanticObjectId
 
     owner_id = PydanticObjectId(_FAKE_USER_ID)
