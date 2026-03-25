@@ -83,14 +83,6 @@ export class GameScene extends Phaser.Scene {
         this.chunkManager.renderAll(chunks, viewMode as ViewMode);
       }
     );
-
-    // Emit update_viewport with initial camera bbox if we have a cityId
-    if (this.cityId) {
-      const cam = this.cameras.main;
-      const wv = cam.worldView;
-      const bbox = cameraBoundsToChunkBbox(wv.left, wv.top, wv.right, wv.bottom);
-      emitUpdateViewport(this.cityId, bbox);
-    }
   }
 
   update(_time: number, _delta: number) {
