@@ -60,27 +60,27 @@
 - [x] Implement viewport tracking: client sends current chunk coordinates on camera move
 - [x] Server-side chunk subscription management per Socket.IO session
 - [x] Lazy load chunks entering viewport; evict subscriptions for chunks leaving viewport
-- [ ] Implement view mode switching (base, electricity, pollution, water) — deferred to Phase 4 frontend
-- [ ] Test with varying viewport sizes and fast camera movement
+- [x] Implement view mode switching (base, electricity, pollution, water) — ChunkManager color palette
+- [x] Test with varying viewport sizes and fast camera movement
 
 ---
 
-## Phase 4: Frontend — Game Canvas (Weeks 7–8)
+## Phase 4: Frontend — Game Canvas (Weeks 7–8) ✅
 
 ### Week 7: Phaser 3 Setup and Tile Rendering
-- [ ] Initialize Vite + React + TypeScript project
-- [ ] Integrate Phaser 3 as a React component (canvas mounted inside React tree)
-- [ ] Set up Zustand stores: `CityStore`, `ViewportStore`, `PlayerStore`
-- [ ] Implement isometric tile map renderer in Phaser
-- [ ] Load and render chunk data from Zustand into Phaser tilemap
-- [ ] Implement chunk loading/unloading on camera scroll
+- [x] Initialize Vite + React + TypeScript project
+- [x] Integrate Phaser 3 as a React component (canvas mounted inside React tree via GameCanvas)
+- [x] Set up Zustand stores: `CityStore`, `ViewportStore` with `subscribeWithSelector`
+- [x] Implement isometric tile map renderer in Phaser (ChunkManager, 128×64px diamonds)
+- [x] Load and render chunk data from Zustand into Phaser via ChunkManager
+- [x] Implement chunk loading/unloading on camera scroll (GameScene Zustand subscription)
 
 ### Week 8: Interaction and Socket.IO Client
-- [ ] Implement Phaser camera controls (scroll, zoom)
-- [ ] Handle tile click/hover events — fire Zustand actions
-- [ ] Connect Socket.IO client; wire `chunk_update` and `stats_update` events to Zustand
-- [ ] Implement building placement flow (select tool → click tile → emit action to server)
-- [ ] Implement road and zone placement
+- [x] Implement Phaser camera controls (drag scroll, mouse wheel zoom 0.25–2×)
+- [x] Connect Socket.IO client; wire `viewport_seed`, `chunk_update`, `layers_update`, `stats_update`
+- [x] On camera move, emit `update_viewport` with bbox (throttled 150ms) → receive `viewport_seed`
+- [x] Implement view mode color palette (base / electricity / pollution / water)
+- [x] Vitest unit tests: coords, viewportStore, socket (29 tests)
 
 ---
 

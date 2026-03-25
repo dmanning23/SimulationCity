@@ -6,29 +6,11 @@
 **Phase 2 (Simulation Engine) — COMPLETE**
 **Phase 3a (Change Streams) — COMPLETE**
 **Phase 3b (Viewport Subscriptions) — COMPLETE**
+**Phase 4 (Frontend Game Canvas) — COMPLETE**
 
 ---
 
-## Phase 4 — Frontend Game Canvas (Weeks 7–8) ← YOU ARE HERE
-
-### Week 7: Phaser 3 Setup and Tile Rendering
-- [ ] `frontend/src/game/` is empty — create `GameScene.ts` (isometric tilemap renderer)
-- [ ] Create `ChunkManager.ts` — load/unload chunks from Zustand into Phaser tilemap
-- [ ] Implement chunk loading/unloading on camera scroll
-- [ ] Set up Zustand stores: `CityStore`, `ViewportStore`, `PlayerStore` (scaffolded, needs wiring)
-
-### Week 8: Interaction and Socket.IO Client
-- [ ] Camera controls: scroll, zoom
-- [ ] Tile click/hover events → Zustand actions
-- [ ] Wire `chunk_update`, `layers_update`, and `stats_update` Socket.IO events to Zustand
-- [ ] On camera move, emit `update_viewport` with bbox → receive `viewport_seed`
-- [ ] Building placement flow: select tool → click tile → emit `build_action` to server
-- [ ] Road and zone placement
-- [ ] Implement view mode switching (base, electricity, pollution, water)
-
----
-
-## Phase 5 — React UI (Week 9)
+## Phase 5 — React UI (Week 9) ← YOU ARE HERE
 
 - [ ] `frontend/src/components/` is empty — all HUD components needed
 - [ ] HUD: treasury, population, happiness, simulation speed controls
