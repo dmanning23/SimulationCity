@@ -11,6 +11,7 @@ from app.services.auth import decode_token
 # The Celery() constructor reads broker config but does not establish a socket connection
 # until send_task() is called, so startup-order risk is limited to misconfiguration.
 from workers.celery_app import celery_app as _celery_app
+from app import viewport_store
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,7 @@ async def disconnect(sid: str):
         )
 
     logger.info("Player %s disconnected (sid=%s)", user_id, sid)
+    viewport_store.remove_session(sid)
 
 
 @sio.event
@@ -121,6 +123,18 @@ async def join_city(sid: str, data: dict):
     await sio.enter_room(sid, f"city:{city_id}")
     await sio.save_session(sid, {**session, "city_id": city_id})
 
+    # Register initial viewport subscription so change stream delivery works immediately.
+    # Converts the chunkX/chunkY/radius format from join_city into a bbox.
+    vp = data.get("viewport") or {}
+    cx = int(vp.get("chunkX", 0))
+    cy = int(vp.get("chunkY", 0))
+    radius = int(vp.get("radius", 2))
+    viewport_store.update_viewport(
+        sid, city_id,
+        max(0, cx - radius), max(0, cy - radius),
+        cx + radius, cy + radius,
+    )
+
     # Notify others in the room
     await sio.emit(
         "player_joined",
@@ -157,6 +171,7 @@ async def leave_city(sid: str):
     user_id = session.get("user_id")
 
     if city_id:
+        viewport_store.remove_session(sid)
         await sio.leave_room(sid, f"city:{city_id}")
         await sio.save_session(sid, {k: v for k, v in session.items() if k != "city_id"})
         await sio.emit(
