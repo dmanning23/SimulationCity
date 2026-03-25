@@ -5,7 +5,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from bson import ObjectId
 
+import app.viewport_store as _vp_store
+
 _CITY_OID = ObjectId("000000000000000000000001")
+_SUBSCRIBER_SID = "test-subscriber-sid"
 
 
 # --- helpers ---
@@ -52,6 +55,15 @@ def _city_doc(city_id=_CITY_OID):
         "global_stats": {"population": 11, "treasury": 1001.1, "happiness": 75},
         "last_updated": "...",
     }
+
+
+@pytest.fixture(autouse=True)
+def clear_viewport_store():
+    _vp_store.session_subscriptions.clear()
+    _vp_store.chunk_subscribers.clear()
+    yield
+    _vp_store.session_subscriptions.clear()
+    _vp_store.chunk_subscribers.clear()
 
 
 # --- _route_chunk_event ---
@@ -229,10 +241,14 @@ def _city_change_event(city_id=_CITY_OID):
 
 @pytest.mark.asyncio
 async def test_watch_chunks_emits_layers_update():
-    """_watch_chunks emits layers_update when stream yields a layers change event."""
+    """_watch_chunks emits layers_update to subscribed sessions only."""
     from app.change_stream import _watch_chunks
 
-    event = _chunk_change_event()
+    event = _chunk_change_event()  # city=_CITY_OID, x=0, y=0
+    chunk_key = f"{_CITY_OID}:0:0"
+    _vp_store.session_subscriptions[_SUBSCRIBER_SID] = {chunk_key}
+    _vp_store.chunk_subscribers[chunk_key] = {_SUBSCRIBER_SID}
+
     mock_sio = AsyncMock()
     mock_collection = MagicMock()
     mock_collection.watch.return_value = _MockStream(event)
@@ -250,8 +266,26 @@ async def test_watch_chunks_emits_layers_update():
             "chunk_y": 0,
             "layers": {"electricity": {}, "pollution": {"coverage": 0.25}, "water": {}},
         },
-        room=f"city:{_CITY_OID}",
+        to=_SUBSCRIBER_SID,
     )
+
+
+@pytest.mark.asyncio
+async def test_watch_chunks_not_emitted_when_no_subscriber():
+    """_watch_chunks does not emit when no session is subscribed to the chunk."""
+    from app.change_stream import _watch_chunks
+
+    event = _chunk_change_event()  # store is empty — no subscribers
+    mock_sio = AsyncMock()
+    mock_collection = MagicMock()
+    mock_collection.watch.return_value = _MockStream(event)
+    mock_db = MagicMock()
+    mock_db.__getitem__ = MagicMock(return_value=mock_collection)
+
+    with pytest.raises(asyncio.CancelledError):
+        await _watch_chunks(mock_sio, mock_db)
+
+    mock_sio.emit.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -281,6 +315,10 @@ async def test_watch_chunks_skips_bookkeeping_event():
 async def test_watch_chunks_retries_on_exception():
     """_watch_chunks logs and reopens the stream after a non-cancel exception."""
     from app.change_stream import _watch_chunks
+
+    chunk_key = f"{_CITY_OID}:0:0"
+    _vp_store.session_subscriptions[_SUBSCRIBER_SID] = {chunk_key}
+    _vp_store.chunk_subscribers[chunk_key] = {_SUBSCRIBER_SID}
 
     call_count = 0
 

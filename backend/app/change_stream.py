@@ -12,6 +12,8 @@ import logging
 
 import socketio
 
+from app import viewport_store
+
 logger = logging.getLogger(__name__)
 
 
@@ -97,7 +99,18 @@ async def _watch_chunks(sio: socketio.AsyncServer, db) -> None:
                     result = _route_chunk_event(event)
                     if result:
                         event_name, payload = result
-                        await sio.emit(event_name, payload, room=f"city:{payload['city_id']}")
+                        city_id = payload["city_id"]
+                        chunk_x = payload.get("chunk_x")
+                        chunk_y = payload.get("chunk_y")
+                        if chunk_x is None or chunk_y is None:
+                            logger.warning(
+                                "chunk event for city %s missing coordinates — skipping delivery",
+                                city_id,
+                            )
+                        else:
+                            chunk_key = f"{city_id}:{chunk_x}:{chunk_y}"
+                            for sid in viewport_store.get_subscribers(chunk_key):
+                                await sio.emit(event_name, payload, to=sid)
         except asyncio.CancelledError:
             raise
         except Exception as exc:
