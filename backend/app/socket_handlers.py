@@ -186,11 +186,50 @@ async def leave_city(sid: str):
 
 @sio.event
 async def update_viewport(sid: str, data: dict):
-    """Client notifies server about viewport change for chunk subscription management (Phase 3)."""
+    """Replace the viewport subscription for this session and seed newly-visible chunks."""
     session = await sio.get_session(sid)
-    if not session or not session.get("city_id"):
+    city_id = session.get("city_id") if session else None
+    if not city_id:
+        await sio.emit("error", {"message": "Must be joined to a city first"}, to=sid)
         return
-    await sio.save_session(sid, {**session, "viewport": data.get("viewport", {})})
+
+    payload_city_id = str(data.get("city_id", ""))
+    if payload_city_id != str(city_id):
+        await sio.emit("error", {"message": "city_id does not match joined city"}, to=sid)
+        return
+
+    try:
+        min_x = int(data["min_x"])
+        min_y = int(data["min_y"])
+        max_x = int(data["max_x"])
+        max_y = int(data["max_y"])
+    except (KeyError, TypeError, ValueError):
+        await sio.emit("error", {"message": "min_x, min_y, max_x, max_y must be integers"}, to=sid)
+        return
+
+    if max_x < min_x or max_y < min_y:
+        await sio.emit("error", {"message": "max must be >= min"}, to=sid)
+        return
+
+    if (max_x - min_x + 1) > 20 or (max_y - min_y + 1) > 20:
+        await sio.emit("error", {"message": "Viewport exceeds maximum size of 20x20 chunks"}, to=sid)
+        return
+
+    added, _removed = viewport_store.update_viewport(sid, city_id, min_x, min_y, max_x, max_y)
+
+    chunks: list[dict] = []
+    if added:
+        # $or query to fetch exactly the added (x, y) pairs (non-rectangular diffs need this)
+        coord_conditions = [
+            {"coordinates.x": int(k.split(":")[1]), "coordinates.y": int(k.split(":")[2])}
+            for k in added
+        ]
+        results = await Chunk.find(
+            {"city_id": PydanticObjectId(city_id), "$or": coord_conditions}
+        ).to_list()
+        chunks = [c.model_dump(mode="json") for c in results]
+
+    await sio.emit("viewport_seed", {"city_id": city_id, "chunks": chunks}, to=sid)
 
 
 @sio.event
