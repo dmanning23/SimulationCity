@@ -120,6 +120,26 @@ def test_route_chunk_push_buildings_returns_chunk_update():
     assert "terrain" not in payload
 
 
+def test_route_chunk_push_roads_returns_chunk_update():
+    """Road changes should route to chunk_update, not be silently dropped."""
+    from app.change_stream import _route_chunk_event
+    doc = _chunk_doc()
+    event = _chunk_event(
+        {"base.roads.0": {"id": "r1", "type": "road"}, "last_updated": "..."},
+        doc,
+    )
+    result = _route_chunk_event(event)
+    assert result is not None
+    name, payload = result
+    assert name == "chunk_update"
+    assert payload["city_id"] == str(_CITY_OID)
+    assert payload["chunk_x"] == 2
+    assert payload["chunk_y"] == 3
+    assert payload["buildings"] == doc["base"]["buildings"]
+    assert payload["roads"] == []
+    assert "terrain" not in payload
+
+
 def test_route_chunk_only_bookkeeping_skipped():
     from app.change_stream import _route_chunk_event
     event = _chunk_event({"last_updated": "...", "version": 2}, _chunk_doc())

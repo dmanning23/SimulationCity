@@ -40,8 +40,8 @@ def _route_chunk_event(event: dict) -> tuple[str, dict] | None:
             "layers": full_doc.get("layers", {}),
         }
 
-    # $push to base.buildings generates keys like "base.buildings.3" — use prefix match
-    if any(k.startswith("base.buildings.") for k in keys):
+    # $push to base.buildings/roads generates keys like "base.buildings.3" or "base.roads.0" — use prefix match
+    if any(k.startswith("base.buildings.") or k.startswith("base.roads.") for k in keys):
         base = full_doc.get("base", {})
         return "chunk_update", {
             "city_id": city_id,
