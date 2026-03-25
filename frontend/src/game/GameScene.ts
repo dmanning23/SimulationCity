@@ -1,6 +1,6 @@
 import Phaser from "phaser";
 import { ChunkManager } from "./ChunkManager";
-import type { ViewMode } from "./ChunkManager";
+import type { ViewMode } from "../stores/cityStore";
 import { cameraBoundsToChunkBbox } from "./coords";
 import { useViewportStore } from "../stores/viewportStore";
 import { useCityStore } from "../stores/cityStore";

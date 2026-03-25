@@ -87,7 +87,10 @@ describe("emitUpdateViewport", () => {
     emitUpdateViewport("city1", { min_x: 0, min_y: 0, max_x: 2, max_y: 2 });
     expect(mockSocket.emit).toHaveBeenCalledWith("update_viewport", {
       city_id: "city1",
-      bbox: { min_x: 0, min_y: 0, max_x: 2, max_y: 2 },
+      min_x: 0,
+      min_y: 0,
+      max_x: 2,
+      max_y: 2,
     });
   });
 });

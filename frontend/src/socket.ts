@@ -70,7 +70,7 @@ export function emitUpdateViewport(
   cityId: string,
   bbox: { min_x: number; min_y: number; max_x: number; max_y: number }
 ): void {
-  socket?.emit("update_viewport", { city_id: cityId, bbox });
+  socket?.emit("update_viewport", { city_id: cityId, ...bbox });
 }
 
 export const getSocket = (): Socket | null => socket;

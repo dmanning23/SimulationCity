@@ -79,4 +79,11 @@ describe("cameraBoundsToChunkBbox", () => {
     expect(TILE_H).toBe(64);
     expect(CHUNK_SIZE).toBe(16);
   });
+
+  it("produces negative chunk coords when camera is left of origin", () => {
+    // Camera far to the left — should produce negative min_x
+    const bbox = cameraBoundsToChunkBbox(-5000, -5000, -4000, -4000);
+    expect(bbox.min_x).toBeLessThan(0);
+    expect(bbox.min_y).toBeLessThan(0);
+  });
 });

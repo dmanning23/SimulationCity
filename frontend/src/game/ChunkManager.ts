@@ -1,8 +1,7 @@
 import Phaser from "phaser";
 import { TILE_W, TILE_H, CHUNK_SIZE, tileToWorld } from "./coords";
 import type { Chunk } from "../stores/viewportStore";
-
-export type ViewMode = "base" | "electricity" | "pollution" | "water";
+import type { ViewMode } from "../stores/cityStore";
 
 /**
  * Manages one Phaser.GameObjects.Graphics per loaded chunk.
