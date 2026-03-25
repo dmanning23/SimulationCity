@@ -11,20 +11,18 @@ export function createPhaserGame({ parent, cityId }: PhaserGameConfig): Phaser.G
     type: Phaser.AUTO,
     parent,
     backgroundColor: "#111827",
-    scene: [GameScene],
+    scene: [], // empty — scene is added and started manually once the game is ready
     scale: {
       mode: Phaser.Scale.RESIZE,
       autoCenter: Phaser.Scale.CENTER_BOTH,
     },
   });
 
-  // Pass cityId to the scene once the game is ready.
-  // GameScene.init(data) will receive { cityId }.
-  if (cityId) {
-    game.events.once("ready", () => {
-      game.scene.start("GameScene", { cityId });
-    });
-  }
+  // Add and start GameScene exactly once with cityId data, avoiding double-init.
+  // scene.add(key, SceneClass, autoStart, initData) passes data directly to init().
+  game.events.once("ready", () => {
+    game.scene.add("GameScene", GameScene, true, { cityId: cityId ?? null });
+  });
 
   return game;
 }

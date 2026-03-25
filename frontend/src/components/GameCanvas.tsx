@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { createPhaserGame } from "../game/PhaserGame";
+import { initSocket } from "../socket";
 import type Phaser from "phaser";
 
 interface GameCanvasProps {
@@ -12,6 +13,10 @@ export function GameCanvas({ cityId }: GameCanvasProps) {
 
   useEffect(() => {
     if (!containerRef.current || gameRef.current) return;
+
+    if (cityId) {
+      initSocket(cityId);
+    }
 
     gameRef.current = createPhaserGame({
       parent: containerRef.current,
