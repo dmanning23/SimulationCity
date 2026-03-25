@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { subscribeWithSelector } from "zustand/middleware";
 
 export type ViewMode = "base" | "electricity" | "pollution" | "water";
 
@@ -19,21 +20,23 @@ interface CityStore {
   clearCity: () => void;
 }
 
-export const useCityStore = create<CityStore>((set) => ({
-  cityId: null,
-  cityName: null,
-  globalStats: { population: 0, happiness: 50, treasury: 10000 },
-  activeViewMode: "base",
+export const useCityStore = create<CityStore>()(
+  subscribeWithSelector((set) => ({
+    cityId: null,
+    cityName: null,
+    globalStats: { population: 0, happiness: 50, treasury: 10000 },
+    activeViewMode: "base",
 
-  setCityId: (cityId, cityName = null) => set({ cityId, cityName }),
-  setGlobalStats: (stats) =>
-    set((state) => ({ globalStats: { ...state.globalStats, ...stats } })),
-  setViewMode: (activeViewMode) => set({ activeViewMode }),
-  clearCity: () =>
-    set({
-      cityId: null,
-      cityName: null,
-      globalStats: { population: 0, happiness: 50, treasury: 10000 },
-      activeViewMode: "base",
-    }),
-}));
+    setCityId: (cityId, cityName = null) => set({ cityId, cityName }),
+    setGlobalStats: (stats) =>
+      set((state) => ({ globalStats: { ...state.globalStats, ...stats } })),
+    setViewMode: (activeViewMode) => set({ activeViewMode }),
+    clearCity: () =>
+      set({
+        cityId: null,
+        cityName: null,
+        globalStats: { population: 0, happiness: 50, treasury: 10000 },
+        activeViewMode: "base",
+      }),
+  }))
+);
