@@ -1,7 +1,5 @@
+import { GameCanvas } from "./components/GameCanvas";
+
 export default function App() {
-  return (
-    <div className="min-h-screen bg-gray-900 text-white flex items-center justify-center">
-      <h1 className="text-4xl font-bold tracking-tight">SimulationCity</h1>
-    </div>
-  );
+  return <GameCanvas />;
 }
