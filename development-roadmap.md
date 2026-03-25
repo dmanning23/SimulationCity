@@ -13,36 +13,36 @@
 ## Phase 1: Foundation (Weeks 1–2)
 
 ### Week 1: Project Setup and Basic Communication
-- [ ] Initialize monorepo structure (`/backend`, `/frontend`, `/workers`)
+- [x] Initialize monorepo structure (`/backend`, `/frontend`, `/workers`)
 - [ ] Set up Heroku project and environments (development/staging/production)
-- [ ] Stand up FastAPI app with python-socketio ASGI integration (uvicorn)
-- [ ] Connect to MongoDB Atlas; initialize Beanie with document models
-- [ ] Implement basic Socket.IO connection/disconnection handling
-- [ ] Set up basic JWT authentication (FastAPI + python-jose)
+- [x] Stand up FastAPI app with python-socketio ASGI integration (uvicorn)
+- [x] Connect to MongoDB Atlas; initialize Beanie with document models
+- [x] Implement basic Socket.IO connection/disconnection handling
+- [x] Set up basic JWT authentication (FastAPI + python-jose)
 
 ### Week 2: Core Game State Management
-- [ ] Implement city creation and basic CRUD REST endpoints (FastAPI)
-- [ ] Set up Socket.IO rooms keyed by `city:{city_id}`
-- [ ] Create chunk data structure and initial map generation logic
-- [ ] Implement city join/leave logic with viewport state tracking
-- [ ] Test multi-player connections to the same city room
+- [x] Implement city creation and basic CRUD REST endpoints (FastAPI)
+- [x] Set up Socket.IO rooms keyed by `city:{city_id}`
+- [x] Create chunk data structure and initial map generation logic
+- [x] Implement city join/leave logic with viewport state tracking
+- [x] Test multi-player connections to the same city room
 
 ---
 
 ## Phase 2: Simulation Engine (Weeks 3–4)
 
 ### Week 3: Celery Integration
-- [ ] Set up Redis on Heroku (as Celery broker + result backend)
-- [ ] Configure Celery app with `simulation` and `high_priority` queues
-- [ ] Create Celery worker dyno setup and local dev worker process
-- [ ] Implement job enqueueing from Socket.IO server (player build actions → high_priority queue)
-- [ ] Test basic job processing flow end-to-end
+- [x] Set up Redis on Heroku (as Celery broker + result backend)
+- [x] Configure Celery app with `simulation` and `high_priority` queues
+- [x] Create Celery worker dyno setup and local dev worker process
+- [x] Implement job enqueueing from Socket.IO server (player build actions → high_priority queue)
+- [x] Test basic job processing flow end-to-end
 
 ### Week 4: Core Simulation Logic
-- [ ] Implement `simulate_city_tick` Celery task (chunk-based processing)
-- [ ] Build simulation rules: zoning, population growth, resource consumption
-- [ ] Write simulation results back to MongoDB via pymongo
-- [ ] Implement periodic tick scheduling (Celery Beat)
+- [x] Implement `simulate_city_tick` Celery task (chunk-based processing)
+- [x] Build simulation rules: zoning, population growth, resource consumption
+- [x] Write simulation results back to MongoDB via pymongo
+- [x] Implement periodic tick scheduling (Celery Beat)
 - [ ] Test simulation with multiple concurrent cities
 
 ---
@@ -50,17 +50,17 @@
 ## Phase 3: Real-Time Updates (Weeks 5–6)
 
 ### Week 5: MongoDB Change Streams
-- [ ] Implement change stream listeners on the Socket.IO server (Motor async)
-- [ ] Filter change events by `cityId` and active player viewports
-- [ ] Broadcast chunk and stats updates to relevant Socket.IO city rooms
+- [x] Implement change stream listeners on the Socket.IO server (Motor async)
+- [x] Filter change events by `cityId` and active player viewports
+- [x] Broadcast chunk and stats updates to relevant Socket.IO city rooms
 - [ ] Test real-time updates with multiple simultaneous connections
 - [ ] Optimize payload size — only send diff, not full chunk
 
 ### Week 6: Viewport-Based Data Delivery
-- [ ] Implement viewport tracking: client sends current chunk coordinates on camera move
-- [ ] Server-side chunk subscription management per Socket.IO session
-- [ ] Lazy load chunks entering viewport; evict subscriptions for chunks leaving viewport
-- [ ] Implement view mode switching (base, electricity, pollution, water)
+- [x] Implement viewport tracking: client sends current chunk coordinates on camera move
+- [x] Server-side chunk subscription management per Socket.IO session
+- [x] Lazy load chunks entering viewport; evict subscriptions for chunks leaving viewport
+- [ ] Implement view mode switching (base, electricity, pollution, water) — deferred to Phase 4 frontend
 - [ ] Test with varying viewport sizes and fast camera movement
 
 ---

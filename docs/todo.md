@@ -3,60 +3,28 @@
 ## Current Status
 
 **Phase 1 (Foundation) — COMPLETE**
-
-Project scaffold is in place: structure, config, models, auth/city endpoints, Socket.IO handler skeleton, Celery app stub, Zustand stores, socket/api clients. No game logic implemented yet.
-
----
-
-## Phase 2 — Simulation Engine (Weeks 3–4) ← YOU ARE HERE
-
-### Week 3: Celery Integration
-- [ ] Add Redis service to `docker-compose.yml` (referenced in config but missing from compose)
-- [ ] Create `backend/workers/simulation.py` — `simulate_city_tick` task stub
-- [ ] Create `backend/workers/build_actions.py` — `process_build_action` task stub
-- [ ] Enable `celery_app.autodiscover_tasks(...)` in `backend/workers/celery_app.py`
-- [ ] Wire Socket.IO `build_action` event in `socket_handlers.py` → enqueue to `high_priority` queue
-- [ ] Test end-to-end: client → Socket.IO → Celery task → result
-
-### Week 4: Core Simulation Logic
-- [ ] Implement `simulate_city_tick`: iterate city chunks, apply simulation rules
-- [ ] Simulation rules: zoning growth, population calculation, resource consumption (power/water)
-- [ ] Write tick results back to MongoDB via pymongo (not Beanie — workers use pymongo directly)
-- [ ] Set up Celery Beat periodic schedule for city ticks
-- [ ] Unit tests for simulation rules; integration test for full tick
+**Phase 2 (Simulation Engine) — COMPLETE**
+**Phase 3a (Change Streams) — COMPLETE**
+**Phase 3b (Viewport Subscriptions) — COMPLETE**
 
 ---
 
-## Phase 3 — Real-Time Updates (Weeks 5–6)
-
-### Week 5: MongoDB Change Streams
-- [ ] Implement change stream listener on Socket.IO server (Motor async driver)
-- [ ] Filter change events by `cityId` + active player viewport subscriptions
-- [ ] Broadcast `chunk_update` / `stats_update` to Socket.IO city rooms
-- [ ] Test real-time updates with multiple simultaneous connections
-- [ ] Optimize payload — send diff only, not full chunk
-
-### Week 6: Viewport-Based Data Delivery
-- [ ] Client emits `viewport_update` on camera move → server manages chunk subscriptions
-- [ ] Lazy load chunks entering viewport; unsubscribe on exit
-- [ ] Implement view modes: base, electricity, pollution, water
-- [ ] Test with varying viewport sizes and fast camera movement
-
----
-
-## Phase 4 — Frontend Game Canvas (Weeks 7–8)
+## Phase 4 — Frontend Game Canvas (Weeks 7–8) ← YOU ARE HERE
 
 ### Week 7: Phaser 3 Setup and Tile Rendering
 - [ ] `frontend/src/game/` is empty — create `GameScene.ts` (isometric tilemap renderer)
 - [ ] Create `ChunkManager.ts` — load/unload chunks from Zustand into Phaser tilemap
 - [ ] Implement chunk loading/unloading on camera scroll
+- [ ] Set up Zustand stores: `CityStore`, `ViewportStore`, `PlayerStore` (scaffolded, needs wiring)
 
 ### Week 8: Interaction and Socket.IO Client
 - [ ] Camera controls: scroll, zoom
 - [ ] Tile click/hover events → Zustand actions
-- [ ] Wire `chunk_update` and `stats_update` Socket.IO events to Zustand
-- [ ] Building placement flow: select tool → click tile → emit action to server
+- [ ] Wire `chunk_update`, `layers_update`, and `stats_update` Socket.IO events to Zustand
+- [ ] On camera move, emit `update_viewport` with bbox → receive `viewport_seed`
+- [ ] Building placement flow: select tool → click tile → emit `build_action` to server
 - [ ] Road and zone placement
+- [ ] Implement view mode switching (base, electricity, pollution, water)
 
 ---
 
@@ -75,7 +43,7 @@ Project scaffold is in place: structure, config, models, auth/city endpoints, So
 ## Phase 6 — Scaling and Robustness (Week 10)
 
 - [ ] Robust reconnection flow with viewport state restoration
-- [ ] Socket.IO Redis adapter for horizontal web dyno scaling
+- [ ] Socket.IO Redis adapter for horizontal web dyno scaling (viewport_store is currently in-process only)
 - [ ] Celery worker auto-scaling based on queue depth
 - [ ] MongoDB compound index on `(cityId, coordinates)` for chunks
 - [ ] Resource cleanup for cities with no active players
