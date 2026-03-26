@@ -91,14 +91,94 @@ Bottom-center pill. Two groups separated by a vertical divider:
 - Reads `useCityStore(s => s.activeViewMode)`
 - Active mode: highlighted blue background (`#1d4ed8`, border `#3b82f6`, text `#93c5fd`)
 - Inactive: `#21262d` background, `#8b949e` text
-- Click calls `useCityStore.getState().setViewMode(mode)`
+- Click calls `useCityStore.getState().setViewMode(mode)` with the exact `ViewMode` string:
+  - "Base" button → `setViewMode("base")`
+  - "⚡" button → `setViewMode("electricity")`
+  - "🌫️" button → `setViewMode("pollution")`
+  - "💧" button → `setViewMode("water")`
 - `pointer-events: auto` on this group only
 
 Style: `position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%)`, same glass background, `border-radius: 24px`.
 
 ---
 
-## Socket Events
+## Backend Changes Required
+
+Two backend changes are in scope for Phase 5a:
+
+### 1. Extend `player_joined` payload with `username` and `role`
+
+In `backend/app/socket_handlers.py`, the `join_city` handler currently emits `{ user_id }` only. It must be extended to include `username` and `role`. Since `username` is not in the session, the handler must query the `Player` model:
+
+```python
+from backend.app.models.player import Player as PlayerModel
+
+# Inside join_city, before the player_joined emit:
+player = await PlayerModel.find_one(PlayerModel.id == PydanticObjectId(user_id))
+player_username = player.username if player else user_id
+
+# Find the joining player's role (owner = "admin", collaborator = their stored role)
+if is_owner:
+    player_role = "admin"
+else:
+    collab = next((c for c in city.collaborators if str(c.user_id) == user_id), None)
+    player_role = collab.role.value if collab else "viewer"
+
+await sio.emit(
+    "player_joined",
+    {"user_id": user_id, "username": player_username, "role": player_role},
+    room=f"city:{city_id}",
+    skip_sid=sid,
+)
+```
+
+### 2. Extend `initial_state` payload with `collaborators`
+
+The `initial_state` emission must include a `collaborators` list so the joining player can populate their `PlayerList` immediately without waiting for subsequent `player_joined` events from other players. Since `city.collaborators` only stores `user_id` + `role`, the handler must fetch usernames:
+
+```python
+# Fetch usernames for all currently connected collaborators
+# (only active sessions — those in the city room)
+active_sids = await sio.manager.get_participants(f"city:{city_id}")
+active_user_ids = set()
+for s in active_sids:
+    sess = await sio.get_session(s)
+    if sess and sess.get("user_id") and sess.get("user_id") != user_id:
+        active_user_ids.add(sess["user_id"])
+
+active_collaborators = []
+for uid in active_user_ids:
+    p = await PlayerModel.find_one(PlayerModel.id == PydanticObjectId(uid))
+    if not is_owner_uid := (str(city.owner_id) == uid):
+        collab = next((c for c in city.collaborators if str(c.user_id) == uid), None)
+        role = collab.role.value if collab else "viewer"
+    else:
+        role = "admin"
+    active_collaborators.append({
+        "user_id": uid,
+        "username": p.username if p else uid,
+        "role": role,
+    })
+
+await sio.emit(
+    "initial_state",
+    {
+        "city": {
+            "id": str(city.id),
+            "name": city.name,
+            "global_stats": city.global_stats.model_dump(),
+            "settings": city.settings.model_dump(),
+            "collaborators": active_collaborators,  # new field
+        },
+        "chunks": chunks,
+    },
+    to=sid,
+)
+```
+
+---
+
+## Socket Events (Frontend)
 
 Add two new handlers to `socket.ts`:
 
@@ -122,7 +202,23 @@ socket.on("player_left", (data: { user_id: string }) => {
 });
 ```
 
-`initial_state` handler already fires on join — update it to populate `collaborators` from `data.city.collaborators` if present.
+Update `initial_state` handler to seed `collaborators` from `data.city.collaborators`:
+
+```typescript
+socket.on("initial_state", (data) => {
+  if (data.city?.collaborators) {
+    usePlayerStore.getState().setCollaborators(
+      data.city.collaborators.map((c: { user_id: string; username: string; role: string }) => ({
+        userId: c.user_id,
+        username: c.username,
+        role: c.role as CollaboratorRole,
+      }))
+    );
+  }
+});
+```
+
+**Self-filtering:** `player_joined` is emitted with `skip_sid=sid`, so the joining player never receives their own event. The `collaborators` list in `PlayerStore` represents all *other* active players — the local player is never included. `PlayerList` renders `collaborators` as-is with no filtering needed.
 
 ---
 
@@ -134,8 +230,10 @@ socket.on("player_left", (data: { user_id: string }) => {
 | Create | `frontend/src/components/StatsBar.tsx` | Treasury / population / happiness |
 | Create | `frontend/src/components/Toolbar.tsx` | Tool palette (display) + view mode switcher |
 | Create | `frontend/src/components/PlayerList.tsx` | Active collaborator avatars |
-| Modify | `frontend/src/socket.ts` | Add `player_joined` / `player_left` handlers |
+| Modify | `frontend/src/socket.ts` | Add `player_joined` / `player_left` handlers; update `initial_state` handler |
 | Modify | `frontend/src/App.tsx` | Add `<HUD />` alongside `<GameCanvas />` |
+| Modify | `backend/app/socket_handlers.py` | Extend `player_joined` payload with `username`+`role`; extend `initial_state` with `collaborators` |
+| Modify | `backend/tests/test_socket_handlers.py` | Tests for updated payload shapes |
 
 ---
 
@@ -159,6 +257,8 @@ Unit tests (Vitest + jsdom) for each component:
 - Renders nothing when collaborators is empty
 - Renders username for each collaborator
 - Renders avatar with first letter of username
+- Same `userId` always produces the same avatar color (deterministic): render the same collaborator twice and assert the color class/style is identical both times
+- Two collaborators with different `userId` values that map to different palette indices produce different colors
 
 **`socket.test.ts` additions**
 - `player_joined` handler adds collaborator to store (no duplicate on second call)
