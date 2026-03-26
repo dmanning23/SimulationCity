@@ -7,6 +7,7 @@ from jose import JWTError
 from app.constants import VALID_ACTION_TYPES
 from app.models.chunk import Chunk
 from app.models.city import City
+from app.models.player import Player as PlayerModel
 from app.services.auth import decode_token
 # The Celery() constructor reads broker config but does not establish a socket connection
 # until send_task() is called, so startup-order risk is limited to misconfiguration.
@@ -136,15 +137,49 @@ async def join_city(sid: str, data: dict):
         cx + radius, cy + radius,
     )
 
-    # Notify others in the room
+    # Resolve username and role for the joining player
+    player_doc = await PlayerModel.find_one(PlayerModel.id == PydanticObjectId(user_id))
+    player_username = player_doc.username if player_doc else user_id
+
+    is_owner = str(city.owner_id) == user_id
+    if is_owner:
+        player_role = "admin"
+    else:
+        collab = next((c for c in city.collaborators if str(c.user_id) == user_id), None)
+        player_role = collab.role.value if collab else "viewer"
+
+    # Notify others in the room (skip the joining player)
     await sio.emit(
         "player_joined",
-        {"user_id": user_id},
+        {"user_id": user_id, "username": player_username, "role": player_role},
         room=f"city:{city_id}",
         skip_sid=sid,
     )
 
-    # Send initial state: city metadata + visible chunks
+    # Collect active collaborators already in the room (excluding the joining player)
+    active_sids = sio.manager.get_participants("/", f"city:{city_id}")
+    active_user_ids: set[str] = set()
+    for s, _ in active_sids:
+        sess = await sio.get_session(s)
+        if sess and sess.get("user_id") and sess.get("user_id") != user_id:
+            active_user_ids.add(sess["user_id"])
+
+    active_collaborators = []
+    for uid in active_user_ids:
+        p = await PlayerModel.find_one(PlayerModel.id == PydanticObjectId(uid))
+        is_player_owner = str(city.owner_id) == uid
+        if is_player_owner:
+            role = "admin"
+        else:
+            c = next((x for x in city.collaborators if str(x.user_id) == uid), None)
+            role = c.role.value if c else "viewer"
+        active_collaborators.append({
+            "user_id": uid,
+            "username": p.username if p else uid,
+            "role": role,
+        })
+
+    # Send initial state: city metadata + active collaborators + visible chunks
     chunks = await _load_viewport_chunks(city_id, data.get("viewport"))
     await sio.emit(
         "initial_state",
@@ -154,6 +189,7 @@ async def join_city(sid: str, data: dict):
                 "name": city.name,
                 "global_stats": city.global_stats.model_dump(),
                 "settings": city.settings.model_dump(),
+                "collaborators": active_collaborators,
             },
             "chunks": chunks,
         },
