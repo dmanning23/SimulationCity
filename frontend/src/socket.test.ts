@@ -2,6 +2,8 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { io } from "socket.io-client";
 import { useViewportStore } from "./stores/viewportStore";
 import { useCityStore } from "./stores/cityStore";
+import { usePlayerStore } from "./stores/playerStore";
+import type { Collaborator } from "./stores/playerStore";
 
 vi.mock("socket.io-client");
 
@@ -20,6 +22,7 @@ beforeEach(() => {
   // IMPORTANT: set mock return AFTER clearAllMocks
   vi.mocked(io).mockReturnValue(mockSocket as unknown as ReturnType<typeof io>);
   useViewportStore.setState({ loadedChunks: new Map() });
+  usePlayerStore.setState({ collaborators: [] });
 });
 
 describe("socket event handlers", () => {
@@ -91,6 +94,80 @@ describe("emitUpdateViewport", () => {
       min_y: 0,
       max_x: 2,
       max_y: 2,
+    });
+  });
+});
+
+describe("player event handlers", () => {
+  it("player_joined adds collaborator to store", async () => {
+    const { initSocket } = await import("./socket");
+    initSocket("city1");
+
+    handlers["player_joined"]({
+      user_id: "uid1",
+      username: "alice",
+      role: "builder",
+    });
+
+    const collaborators = usePlayerStore.getState().collaborators;
+    expect(collaborators).toHaveLength(1);
+    expect(collaborators[0]).toEqual({
+      userId: "uid1",
+      username: "alice",
+      role: "builder",
+    });
+  });
+
+  it("player_joined does not add duplicate if user_id already present", async () => {
+    const { initSocket } = await import("./socket");
+    initSocket("city1");
+
+    handlers["player_joined"]({ user_id: "uid1", username: "alice", role: "builder" });
+    handlers["player_joined"]({ user_id: "uid1", username: "alice", role: "builder" });
+
+    expect(usePlayerStore.getState().collaborators).toHaveLength(1);
+  });
+
+  it("player_left removes collaborator from store", async () => {
+    usePlayerStore.setState({
+      collaborators: [
+        { userId: "uid1", username: "alice", role: "builder" },
+        { userId: "uid2", username: "bob", role: "viewer" },
+      ],
+    });
+
+    const { initSocket } = await import("./socket");
+    initSocket("city1");
+
+    handlers["player_left"]({ user_id: "uid1" });
+
+    const collaborators = usePlayerStore.getState().collaborators;
+    expect(collaborators).toHaveLength(1);
+    expect(collaborators[0].userId).toBe("uid2");
+  });
+
+  it("initial_state seeds collaborators from city.collaborators", async () => {
+    const { initSocket } = await import("./socket");
+    initSocket("city1");
+
+    handlers["initial_state"]({
+      city_id: "city1",
+      city: {
+        id: "city1",
+        name: "Test City",
+        collaborators: [
+          { user_id: "uid3", username: "carol", role: "admin" },
+        ],
+      },
+      chunks: [],
+    });
+
+    const collaborators = usePlayerStore.getState().collaborators;
+    expect(collaborators).toHaveLength(1);
+    expect(collaborators[0]).toEqual({
+      userId: "uid3",
+      username: "carol",
+      role: "admin",
     });
   });
 });

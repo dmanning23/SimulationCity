@@ -3,6 +3,8 @@ import { io, Socket } from "socket.io-client";
 import { useCityStore } from "./stores/cityStore";
 import type { Chunk } from "./stores/viewportStore";
 import { useViewportStore } from "./stores/viewportStore";
+import { usePlayerStore } from "./stores/playerStore";
+import type { CollaboratorRole } from "./stores/playerStore";
 
 let socket: Socket | null = null;
 
@@ -27,10 +29,25 @@ export function initSocket(cityId: string): Socket {
     console.error("[socket] connection error:", err.message)
   );
 
-  socket.on("initial_state", (data: { city_id: string; city: unknown; settings: unknown }) => {
-    // initial_state is superseded by viewport_seed; log and skip for now
-    console.log("[socket] initial_state received for city", data.city_id);
-  });
+  socket.on(
+    "initial_state",
+    (data: {
+      city_id: string;
+      city: {
+        collaborators?: Array<{ user_id: string; username: string; role: string }>;
+      };
+    }) => {
+      if (data.city?.collaborators) {
+        usePlayerStore.getState().setCollaborators(
+          data.city.collaborators.map((c) => ({
+            userId: c.user_id,
+            username: c.username,
+            role: c.role as CollaboratorRole,
+          }))
+        );
+      }
+    }
+  );
 
   socket.on("viewport_seed", (data: { chunks: Chunk[] }) => {
     data.chunks.forEach((chunk) => useViewportStore.getState().updateChunk(chunk));
@@ -56,6 +73,27 @@ export function initSocket(cityId: string): Socket {
       useCityStore.getState().setGlobalStats(data);
     }
   );
+
+  socket.on(
+    "player_joined",
+    (data: { user_id: string; username: string; role: string }) => {
+      const { collaborators } = usePlayerStore.getState();
+      const already = collaborators.some((c) => c.userId === data.user_id);
+      if (!already) {
+        usePlayerStore.getState().setCollaborators([
+          ...collaborators,
+          { userId: data.user_id, username: data.username, role: data.role as CollaboratorRole },
+        ]);
+      }
+    }
+  );
+
+  socket.on("player_left", (data: { user_id: string }) => {
+    const { collaborators } = usePlayerStore.getState();
+    usePlayerStore.getState().setCollaborators(
+      collaborators.filter((c) => c.userId !== data.user_id)
+    );
+  });
 
   socket.on("error", ({ message }: { message: string }) => {
     console.error("[socket] server error:", message);
