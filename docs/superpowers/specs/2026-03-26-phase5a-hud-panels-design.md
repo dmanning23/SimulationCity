@@ -139,7 +139,8 @@ The `initial_state` emission must include a `collaborators` list so the joining 
 ```python
 # Fetch usernames for all currently connected collaborators
 # (only active sessions — those in the city room)
-active_sids = await sio.manager.get_participants(f"city:{city_id}")
+# Note: get_participants is synchronous (no await)
+active_sids = sio.manager.get_participants("/", f"city:{city_id}")
 active_user_ids = set()
 for s in active_sids:
     sess = await sio.get_session(s)
@@ -149,11 +150,12 @@ for s in active_sids:
 active_collaborators = []
 for uid in active_user_ids:
     p = await PlayerModel.find_one(PlayerModel.id == PydanticObjectId(uid))
-    if not is_owner_uid := (str(city.owner_id) == uid):
+    is_player_owner = str(city.owner_id) == uid
+    if is_player_owner:
+        role = "admin"
+    else:
         collab = next((c for c in city.collaborators if str(c.user_id) == uid), None)
         role = collab.role.value if collab else "viewer"
-    else:
-        role = "admin"
     active_collaborators.append({
         "user_id": uid,
         "username": p.username if p else uid,
