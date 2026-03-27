@@ -175,6 +175,7 @@ Stand things up in this order to avoid connection errors on startup:
 | Variable | Value |
 |---|---|
 | `VITE_API_URL` | Railway backend URL (e.g. `https://simulationcity.up.railway.app`) |
+| `VITE_SOCKET_URL` | Same Railway backend URL |
 
 ### Railway setup (backend)
 
@@ -202,8 +203,12 @@ Then:
 1. Connect the GitHub repo to Heroku
 2. Add all environment variables from the table above
 3. Ensure the Heroku Redis add-on is attached — `REDIS_URL` will be set automatically
-4. In the Heroku dashboard, turn **off** the `web` dyno and turn **on** the `worker` dyno
-5. Deploy from `main`
+4. Heroku uses `requirements.txt` for Python deps. Regenerate it when dependencies change:
+   ```bash
+   cd backend && uv export --no-hashes --format requirements-txt -o requirements.txt
+   ```
+5. In the Heroku dashboard, turn **off** the `web` dyno and turn **on** the `worker` dyno
+6. Deploy from `main`
 
 > The `--beat` flag runs the scheduler in the same process as the worker. This is fine for a single-worker deployment — if you scale workers later, run Beat as a separate dyno.
 
