@@ -123,6 +123,115 @@ cd frontend
 npm test
 ```
 
+## Deployment
+
+### Architecture
+
+| Service | Platform | Notes |
+|---|---|---|
+| Frontend | Vercel | Static SPA, auto-deployed from `main` |
+| Backend (FastAPI + Socket.IO) | Railway | Persistent process, WebSocket support |
+| Celery worker + Beat | Heroku (worker dyno) | Background jobs + simulation ticks |
+| Redis | Heroku Redis add-on | Shared broker between backend and Celery |
+| MongoDB | Atlas | Replica set required for change streams |
+
+Both Railway (backend) and Heroku (Celery) use the same Redis and MongoDB URLs — they don't communicate directly.
+
+### Deploy order
+
+Stand things up in this order to avoid connection errors on startup:
+
+1. MongoDB Atlas (already running)
+2. Heroku Redis (already running)
+3. Railway — backend
+4. Heroku — Celery worker
+5. Vercel — frontend
+
+### Environment variables
+
+**Railway (backend)**
+
+| Variable | Value |
+|---|---|
+| `SECRET_KEY` | Long random string — generate with `openssl rand -hex 32` |
+| `ENVIRONMENT` | `production` |
+| `MONGODB_URL` | Atlas connection string |
+| `MONGODB_DB_NAME` | `simulationcity` |
+| `REDIS_URL` | Heroku Redis URL (from Heroku add-on config) |
+| `PORT` | Set automatically by Railway |
+
+**Heroku (Celery worker)**
+
+| Variable | Value |
+|---|---|
+| `SECRET_KEY` | Same value as Railway |
+| `ENVIRONMENT` | `production` |
+| `MONGODB_URL` | Same Atlas connection string |
+| `MONGODB_DB_NAME` | `simulationcity` |
+| `REDIS_URL` | Set automatically by Heroku Redis add-on |
+
+**Vercel (frontend)**
+
+| Variable | Value |
+|---|---|
+| `VITE_API_URL` | Railway backend URL (e.g. `https://simulationcity.up.railway.app`) |
+
+### Railway setup (backend)
+
+1. Create a new Railway project and connect the GitHub repo
+2. Set the **Root directory** to `backend`
+3. Set the **Start command**:
+   ```
+   uvicorn app.main:socket_app --host 0.0.0.0 --port $PORT
+   ```
+4. Add all environment variables from the table above
+5. Deploy — Railway auto-detects Python via `pyproject.toml`
+
+Railway will assign a public URL with WebSocket support enabled by default.
+
+### Heroku setup (Celery worker)
+
+Create a `Procfile` in the repo root (or `backend/Procfile`) with:
+
+```
+worker: cd backend && uv run celery -A workers.celery_app worker -Q simulation,high_priority -l info --beat
+```
+
+Then:
+
+1. Connect the GitHub repo to Heroku
+2. Add all environment variables from the table above
+3. Ensure the Heroku Redis add-on is attached — `REDIS_URL` will be set automatically
+4. In the Heroku dashboard, turn **off** the `web` dyno and turn **on** the `worker` dyno
+5. Deploy from `main`
+
+> The `--beat` flag runs the scheduler in the same process as the worker. This is fine for a single-worker deployment — if you scale workers later, run Beat as a separate dyno.
+
+### Vercel setup (frontend)
+
+1. Import the GitHub repo in Vercel
+2. Set **Root directory** to `frontend`
+3. Build command: `npm run build`
+4. Output directory: `dist`
+5. Add the `VITE_API_URL` environment variable pointing to your Railway backend URL
+6. Deploy
+
+> The frontend currently hardcodes `localhost` for the Socket.IO connection during local dev (via Vite proxy). Before deploying, update `frontend/src/socket.ts` to read the backend URL from `import.meta.env.VITE_API_URL` in production.
+
+### CORS
+
+Update `backend/app/main.py` to add your Vercel domain to `allow_origins` before deploying:
+
+```python
+allow_origins=[
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://your-app.vercel.app",  # add this
+],
+```
+
+---
+
 ## Tech stack
 
 See [tech-stack.md](tech-stack.md) for full dependency list.
